@@ -11,6 +11,7 @@ module.exports = {
         scheme: 'chatterui',
         userInterfaceStyle: 'automatic',
         assetBundlePatterns: ['**/*'],
+
         ios: {
             icon: {
                 dark: './assets/images/ios-dark.png',
@@ -21,6 +22,7 @@ module.exports = {
             package: IS_DEV ? 'com.Vali98.ChatterUIDev' : 'com.Vali98.ChatterUI',
             bundleIdentifier: IS_DEV ? 'com.Vali98.ChatterUIDev' : 'com.Vali98.ChatterUI',
         },
+
         android: {
             adaptiveIcon: {
                 foregroundImage: './assets/images/adaptive-icon-foreground.png',
@@ -36,18 +38,24 @@ module.exports = {
                 'android.permission.FOREGROUND_SERVICE_DATA_SYNC',
             ],
         },
+
         web: {
             bundler: 'metro',
             output: 'static',
             favicon: './assets/images/adaptive-icon.png',
         },
+
         plugins: [
             [
                 'expo-asset',
                 {
-                    assets: ['./assets/models/aibot.raw', './assets/models/llama3tokenizer.gguf'],
+                    assets: [
+                        './assets/models/aibot.raw',
+                        './assets/models/llama3tokenizer.gguf',
+                    ],
                 },
             ],
+
             [
                 'expo-build-properties',
                 {
@@ -57,10 +65,12 @@ module.exports = {
                         enableProguardInReleaseBuilds: true,
                         enableShrinkResourcesInReleaseBuilds: true,
                         useLegacyPackaging: true,
-                        extraProguardRules: '-keep class com.rnllama.** { *; }',
+                        extraProguardRules:
+                            '-keep class com.rnllama.** { *; }',
                     },
                 },
             ],
+
             [
                 'expo-splash-screen',
                 {
@@ -69,30 +79,38 @@ module.exports = {
                     imageWidth: 200,
                 },
             ],
+
             [
                 'expo-notifications',
                 {
                     icon: './assets/images/notification.png',
                 },
             ],
+
             [
                 './expo-build-plugins/androidattributes.plugin.js',
                 {
                     'android:largeHeap': true,
                 },
             ],
+
             ['@vali98/react-native-process-text', { label: 'Ask In ChatterUi' }],
+
             [
                 'expo-camera',
                 {
-                    cameraPermission: 'Allow ChatterUI to access your camera',
+                    cameraPermission:
+                        'Allow ChatterUI to access your camera',
                 },
             ],
+
             ['expo-sqlite', { withSQLiteVecExtension: true }],
+
             [
                 'expo-image-picker',
                 {
-                    photosPermission: 'ChatterUI requires image permissions for vision models',
+                    photosPermission:
+                        'ChatterUI requires image permissions for vision models',
                     colors: {
                         cropToolbarColor: '#000000',
                     },
@@ -103,32 +121,30 @@ module.exports = {
                     },
                 },
             ],
+
             'expo-localization',
             'expo-router',
             'expo-font',
             'expo-image',
+
             './expo-build-plugins/bgactions.plugin.js',
             './expo-build-plugins/usercert.plugin.js',
             './expo-build-plugins/rnllama.plugin.js',
             './expo-build-plugins/copyhtp.plugin.js',
-            /**
-             * Future icon usage will need to be added here
-             * https://github.com/oblador/react-native-vector-icons/blob/master/docs/SETUP-EXPO.md
-             */
+
             '@react-native-vector-icons/ant-design',
             '@react-native-vector-icons/octicons',
             '@react-native-vector-icons/material-icons',
         ],
+
         experiments: {
             typedRoutes: true,
             reactCompiler: true,
         },
+
         extra: {
             router: {
                 origin: false,
-            },
-            eas: {
-                projectId: 'd588a96a-5eb0-457a-85bc-e21acfdc60e9',
             },
         },
     },
