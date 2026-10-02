@@ -30,7 +30,7 @@ jobs:
         run: npm ci
 
       - name: Create EAS project
-        run: eas init --account Nelson37 --force --non-interactive
+        run: eas init --account nelson37 --force --non-interactive
 
       - name: Build Android APK
         run: eas build --platform android --profile preview --non-interactive --no-wait
