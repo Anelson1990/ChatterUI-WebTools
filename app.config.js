@@ -1,8 +1,14 @@
 const IS_DEV = process.env.APP_VARIANT === 'development'
+const IS_PREVIEW = process.env.EAS_BUILD_PROFILE === 'preview'
 
 module.exports = {
     expo: {
-        name: IS_DEV ? 'ChatterUI (DEV)' : 'ChatterUI',
+        name: IS_DEV
+            ? 'ChatterUI (DEV)'
+            : IS_PREVIEW
+                ? 'ChatterUI Test'
+                : 'ChatterUI',
+
         newArchEnabled: true,
         slug: 'ChatterUI',
         version: '0.10.1',
@@ -30,8 +36,15 @@ module.exports = {
                 monochromeImage: './assets/images/adaptive-icon-foreground.png',
                 backgroundColor: '#000',
             },
-            package: IS_DEV ? 'com.Vali98.ChatterUIDev' : 'com.Vali98.ChatterUI',
+
+            package: IS_DEV
+                ? 'com.Vali98.ChatterUIDev'
+                : IS_PREVIEW
+                    ? 'com.Vali98.ChatterUITest'
+                    : 'com.Vali98.ChatterUI',
+
             userInterfaceStyle: 'dark',
+
             permissions: [
                 'android.permission.FOREGROUND_SERVICE',
                 'android.permission.WAKE_LOCK',
@@ -66,16 +79,14 @@ module.exports = {
                         enableShrinkResourcesInReleaseBuilds: true,
                         useLegacyPackaging: true,
 
-                        // The preview APK is intended for physical Android
-                        // devices such as the Galaxy S23+.
-                        // Restricting the native build to ARM64 avoids
-                        // compiling unnecessary x86/x86_64 llama binaries.
+                        // Build only ARM64 for the preview APK.
                         buildArchs:
                             process.env.EAS_BUILD_PROFILE === 'preview'
                                 ? ['arm64-v8a']
                                 : undefined,
 
-                        extraProguardRules: '-keep class com.rnllama.** { *; }',
+                        extraProguardRules:
+                            '-keep class com.rnllama.** { *; }',
                     },
                 },
             ],
@@ -108,7 +119,8 @@ module.exports = {
             [
                 'expo-camera',
                 {
-                    cameraPermission: 'Allow ChatterUI to access your camera',
+                    cameraPermission:
+                        'Allow ChatterUI to access your camera',
                 },
             ],
 
@@ -156,7 +168,8 @@ module.exports = {
             },
 
             eas: {
-                projectId: 'ecc89c53-6265-4394-9aac-d34a1dc80fbc',
+                projectId:
+                    'ecc89c53-6265-4394-9aac-d34a1dc80fbc',
             },
         },
     },
