@@ -3,9 +3,9 @@ import { randomUUID } from 'expo-crypto'
 import { Image } from 'expo-image'
 import { launchImageLibraryAsync, requestMediaLibraryPermissionsAsync } from 'expo-image-picker'
 import { router } from 'expo-router'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Keyboard, Pressable, TextInput, TouchableOpacity, View } from 'react-native'
+import { Keyboard, Pressable, Text, TextInput, TouchableOpacity, View } from 'react-native'
 import { useMMKVBoolean } from 'react-native-mmkv'
 import Animated, {
     BounceIn,
@@ -32,6 +32,7 @@ import { Chats, useInference } from '@lib/state/Chat'
 import { useChatInputTextStore } from '@lib/state/components/ChatInput'
 import { Logger } from '@lib/state/Logger'
 import { Theme } from '@lib/theme/ThemeManager'
+import { mmkv } from '@lib/storage/MMKV'
 
 import ChatOptions from './ChatInputOptions'
 
@@ -63,13 +64,17 @@ const ChatInput = () => {
     const [attachments, setAttachments] = useState<Attachment[]>([])
     const [hideOptions, setHideOptions] = useState(false)
     const cameraSheetRef = useBottomSheetRef()
+
     const { nowGenerating, abortFunction } = useInference(
         useShallow((state) => ({
             nowGenerating: state.nowGenerating,
             abortFunction: state.abortFunction,
         }))
     )
-    const setHeight = useInputHeightStore(useShallow((state) => state.setHeight))
+
+    const setHeight = useInputHeightStore(
+        useShallow((state) => state.setHeight)
+    )
 
     const { charName } = Characters.useCharacterStore(
         useShallow((state) => ({
@@ -79,8 +84,32 @@ const ChatInput = () => {
 
     const { chatId } = Chats.useChat()
 
+    const [webSearchEnabled, setWebSearchEnabled] = useState(false)
+
+    useEffect(() => {
+        if (!chatId || mode !== 'local') {
+            setWebSearchEnabled(false)
+            return
+        }
+
+        setWebSearchEnabled(
+            mmkv.getBoolean(`nexus.webSearch.${chatId}`) ?? false
+        )
+    }, [chatId, mode])
+
+    const toggleWebSearch = () => {
+        if (!chatId || mode !== 'local' || !activeProvider) return
+
+        const next = !webSearchEnabled
+
+        setWebSearchEnabled(next)
+        mmkv.set(`nexus.webSearch.${chatId}`, next)
+    }
+
     const { userName } = Characters.useUserStore(
-        useShallow((state) => ({ userName: state.card?.name }))
+        useShallow((state) => ({
+            userName: state.card?.name,
+        }))
     )
 
     const { newMessage, setNewMessage } = useChatInputTextStore(
@@ -92,13 +121,17 @@ const ChatInput = () => {
 
     const abortResponse = async () => {
         Logger.info(t('chat.input.errors.abortGeneration'))
+
         if (abortFunction) await abortFunction()
     }
 
     const handleSend = async () => {
         Keyboard.dismiss()
+
         if (!chatId) return
+
         setDisableSend(true)
+
         if (newMessage.trim() !== '' || attachments.length > 0)
             Chats.db.mutate.createEntry(
                 chatId,
@@ -107,11 +140,20 @@ const ChatInput = () => {
                 newMessage,
                 attachments.map((item) => item.uri)
             )
+
         try {
-            const result = await Chats.db.mutate.createEntry(chatId, charName ?? '', false, '')
+            const result = await Chats.db.mutate.createEntry(
+                chatId,
+                charName ?? '',
+                false,
+                ''
+            )
+
             setNewMessage('')
             setAttachments([])
+
             const swipeId = result?.swipes?.[0]?.id
+
             if (swipeId) generateResponse(swipeId)
         } catch (e) {
             Logger.errorToast(t('chat.input.errors.failedToSend'))
@@ -122,7 +164,8 @@ const ChatInput = () => {
     }
 
     const handlePickImage = async () => {
-        const permissionResult = await requestMediaLibraryPermissionsAsync()
+        const permissionResult =
+            await requestMediaLibraryPermissionsAsync()
 
         if (!permissionResult.granted) {
             Alert.alert({
@@ -134,10 +177,11 @@ const ChatInput = () => {
                     },
                 ],
             })
+
             return
         }
 
-        let result = await launchImageLibraryAsync({
+        const result = await launchImageLibraryAsync({
             mediaTypes: ['images'],
             allowsMultipleSelection: true,
             aspect: [4, 3],
@@ -152,18 +196,26 @@ const ChatInput = () => {
                 type: 'image',
                 name: item.fileName,
             }))
-            .filter((item) => !attachments.some((a) => a.name === item.name)) as Attachment[]
+            .filter(
+                (item) =>
+                    !attachments.some(
+                        (a) => a.name === item.name
+                    )
+            ) as Attachment[]
 
-        return setAttachments([...attachments, ...newAttachments])
+        setAttachments([...attachments, ...newAttachments])
     }
 
     return (
         <Pressable
             onPress={() => {
                 if (activeProvider) return
+
                 if (mode === 'local') {
                     router.push('/screens/ModelManagerScreen')
-                } else router.push('/screens/ConnectionsManagerScreen')
+                } else {
+                    router.push('/screens/ConnectionsManagerScreen')
+                }
             }}
             onLayout={(e) => {
                 setHeight(e.nativeEvent.layout.height)
@@ -190,17 +242,21 @@ const ChatInput = () => {
                 ],
                 borderRadius: 16,
                 rowGap: spacing.m,
-            }}>
+            }}
+        >
             <Animated.FlatList
                 itemLayoutAnimation={LinearTransition}
                 style={{
-                    display: attachments.length > 0 ? 'flex' : 'none',
+                    display:
+                        attachments.length > 0 ? 'flex' : 'none',
                     padding: spacing.l,
                     backgroundColor: color.neutral._200,
                     borderRadius: borderRadius.m,
                 }}
                 horizontal
-                contentContainerStyle={{ columnGap: spacing.xl }}
+                contentContainerStyle={{
+                    columnGap: spacing.xl,
+                }}
                 data={attachments}
                 keyExtractor={(item) => item.uri}
                 renderItem={({ item }) => {
@@ -208,7 +264,11 @@ const ChatInput = () => {
                         <Animated.View
                             entering={BounceIn}
                             exiting={ZoomOut.duration(100)}
-                            style={{ alignItems: 'center', rowGap: 8 }}>
+                            style={{
+                                alignItems: 'center',
+                                rowGap: 8,
+                            }}
+                        >
                             <Image
                                 source={{ uri: item.uri }}
                                 style={{
@@ -231,16 +291,23 @@ const ChatInput = () => {
                                     position: 'absolute',
                                     alignSelf: 'flex-end',
                                     margin: -8,
-                                    backgroundColor: color.neutral._500,
+                                    backgroundColor:
+                                        color.neutral._500,
                                 }}
                                 onPress={() => {
-                                    setAttachments(attachments.filter((a) => a.uri !== item.uri))
+                                    setAttachments(
+                                        attachments.filter(
+                                            (a) =>
+                                                a.uri !== item.uri
+                                        )
+                                    )
                                 }}
                             />
                         </Animated.View>
                     )
                 }}
             />
+
             <CameraSheet
                 onTakePicture={(picture) => {
                     setAttachments((attachments) => [
@@ -254,12 +321,14 @@ const ChatInput = () => {
                 }}
                 ref={cameraSheetRef}
             />
+
             <View
                 style={{
                     flexDirection: 'row',
                     alignItems: 'center',
                     columnGap: spacing.m,
-                }}>
+                }}
+            >
                 <Animated.View layout={XAxisOnlyTransition}>
                     {!hideOptions && (
                         <Animated.View
@@ -269,15 +338,71 @@ const ChatInput = () => {
                                 flexDirection: 'row',
                                 columnGap: 8,
                                 alignItems: 'center',
-                            }}>
-                            <ChatOptions disabled={!activeProvider} />
+                            }}
+                        >
+                            <ChatOptions
+                                disabled={!activeProvider}
+                            />
+
+                            {mode === 'local' && (
+                                <TouchableOpacity
+                                    disabled={!activeProvider}
+                                    onPress={toggleWebSearch}
+                                    accessibilityRole="switch"
+                                    accessibilityState={{
+                                        checked: webSearchEnabled,
+                                    }}
+                                    style={{
+                                        flexDirection: 'row',
+                                        alignItems: 'center',
+                                        columnGap: 4,
+                                        paddingHorizontal: 8,
+                                        paddingVertical: 6,
+                                        backgroundColor:
+                                            webSearchEnabled
+                                                ? color.primary._500
+                                                : color.neutral._200,
+                                        borderRadius: 16,
+                                        opacity:
+                                            activeProvider ? 1 : 0.5,
+                                    }}
+                                >
+                                    <MaterialIcons
+                                        name="search"
+                                        color={
+                                            webSearchEnabled
+                                                ? color.neutral._100
+                                                : color.text._400
+                                        }
+                                        size={17}
+                                    />
+
+                                    <Text
+                                        style={{
+                                            color:
+                                                webSearchEnabled
+                                                    ? color.neutral._100
+                                                    : color.text._400,
+                                            fontSize: 12,
+                                            fontWeight: '600',
+                                        }}
+                                    >
+                                        {webSearchEnabled
+                                            ? 'Web ON'
+                                            : 'Web OFF'}
+                                    </Text>
+                                </TouchableOpacity>
+                            )}
+
                             <ContextMenu
                                 disabled={!activeProvider}
                                 triggerIcon="paper-clip"
                                 triggerIconSize={20}
                                 buttons={[
                                     {
-                                        label: t('chat.input.actions.takePicture'),
+                                        label: t(
+                                            'chat.input.actions.takePicture'
+                                        ),
                                         icon: 'camera',
                                         onPress: (close) => {
                                             cameraSheetRef.current?.open()
@@ -285,7 +410,9 @@ const ChatInput = () => {
                                         },
                                     },
                                     {
-                                        label: t('chat.input.actions.addImage'),
+                                        label: t(
+                                            'chat.input.actions.addImage'
+                                        ),
                                         icon: 'picture',
                                         onPress: async (close) => {
                                             close()
@@ -296,16 +423,23 @@ const ChatInput = () => {
                                 triggerStyle={{
                                     color: color.text._400,
                                     padding: 6,
-                                    backgroundColor: color.neutral._200,
+                                    backgroundColor:
+                                        color.neutral._200,
                                     borderRadius: 16,
-                                    opacity: activeProvider ? 1 : 0.5,
+                                    opacity: activeProvider
+                                        ? 1
+                                        : 0.5,
                                 }}
                                 placement="top"
                             />
                         </Animated.View>
                     )}
+
                     {hideOptions && (
-                        <Animated.View entering={FadeIn} exiting={FadeOut}>
+                        <Animated.View
+                            entering={FadeIn}
+                            exiting={FadeOut}
+                        >
                             <ThemedButton
                                 iconSize={18}
                                 iconStyle={{
@@ -313,16 +447,20 @@ const ChatInput = () => {
                                 }}
                                 buttonStyle={{
                                     padding: 5,
-                                    backgroundColor: color.neutral._200,
+                                    backgroundColor:
+                                        color.neutral._200,
                                     borderRadius: 32,
                                 }}
                                 variant="tertiary"
                                 iconName="right"
-                                onPress={() => setHideOptions(false)}
+                                onPress={() =>
+                                    setHideOptions(false)
+                                }
                             />
                         </Animated.View>
                     )}
                 </Animated.View>
+
                 <AnimatedTextInput
                     layout={XAxisOnlyTransition}
                     ref={inputRef}
@@ -331,7 +469,9 @@ const ChatInput = () => {
                         backgroundColor: color.neutral._100,
                         flex: 1,
                         borderWidth: 2,
-                        borderColor: activeProvider ? color.primary._300 : color.primary._100,
+                        borderColor: activeProvider
+                            ? color.primary._300
+                            : color.primary._100,
                         borderRadius: borderRadius.l,
                         paddingHorizontal: spacing.m,
                         paddingVertical: spacing.m,
@@ -355,31 +495,59 @@ const ChatInput = () => {
                         setNewMessage(text)
                     }}
                     multiline
-                    submitBehavior={sendOnEnter ? 'blurAndSubmit' : 'newline'}
-                    onSubmitEditing={sendOnEnter ? handleSend : undefined}
+                    submitBehavior={
+                        sendOnEnter
+                            ? 'blurAndSubmit'
+                            : 'newline'
+                    }
+                    onSubmitEditing={
+                        sendOnEnter
+                            ? handleSend
+                            : undefined
+                    }
                 />
+
                 <Animated.View layout={XAxisOnlyTransition}>
                     <TouchableOpacity
-                        disabled={disableSend || !chatId || !activeProvider}
+                        disabled={
+                            disableSend ||
+                            !chatId ||
+                            !activeProvider
+                        }
                         style={{
                             borderRadius: borderRadius.m,
-                            backgroundColor: !activeProvider
-                                ? color.neutral._100
-                                : nowGenerating
-                                  ? color.error._500
-                                  : color.primary._500,
+                            backgroundColor:
+                                !activeProvider
+                                    ? color.neutral._100
+                                    : nowGenerating
+                                      ? color.error._500
+                                      : color.primary._500,
                             padding: spacing.s,
                             borderWidth: 2,
-                            borderColor: !activeProvider
-                                ? color.primary._100
-                                : nowGenerating
-                                  ? color.error._500
-                                  : color.primary._500,
+                            borderColor:
+                                !activeProvider
+                                    ? color.primary._100
+                                    : nowGenerating
+                                      ? color.error._500
+                                      : color.primary._500,
                         }}
-                        onPress={nowGenerating ? abortResponse : handleSend}>
+                        onPress={
+                            nowGenerating
+                                ? abortResponse
+                                : handleSend
+                        }
+                    >
                         <MaterialIcons
-                            name={nowGenerating ? 'stop' : 'send'}
-                            color={activeProvider ? color.neutral._100 : color.text._700}
+                            name={
+                                nowGenerating
+                                    ? 'stop'
+                                    : 'send'
+                            }
+                            color={
+                                activeProvider
+                                    ? color.neutral._100
+                                    : color.text._700
+                            }
                             size={24}
                         />
                     </TouchableOpacity>
