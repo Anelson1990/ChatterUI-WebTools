@@ -1,5 +1,4 @@
 import { JinjaFormattedChatResult } from 'cui-llama.rn'
-import { formatSearchResults, searchDuckDuckGo, WEB_SEARCH_TOOL } from '@lib/tools/WebSearch'
 import { t } from 'i18next'
 
 import Alert from '@components/views/Alert'
@@ -14,6 +13,11 @@ import { Logger } from '@lib/state/Logger'
 import { SamplersManager } from '@lib/state/SamplerState'
 import { useTTSStore } from '@lib/state/TTS'
 import { mmkv } from '@lib/storage/MMKV'
+import {
+    formatSearchResults,
+    searchWeb,
+    WEB_SEARCH_TOOL,
+} from '@lib/tools/WebSearch'
 
 import { APIConfiguration, APISampler, APIValues } from './API/APIBuilder.types'
 import {
@@ -21,6 +25,7 @@ import {
     buildTextCompletionContext,
     ContextBuilderParams,
 } from './API/ContextBuilder'
+import { getDataSources } from './DataSources'
 import { Llama, LlamaConfig } from './Local/LlamaLocal'
 import { KV } from './Local/Model'
 
@@ -52,57 +57,83 @@ export const localSamplerData: APISampler[] = [
 
 const getSamplerFields = (max_length?: number) => {
     const preset: SamplerConfigData = SamplersManager.getCurrentSampler()
+
     return localSamplerData
         .map((item: APISampler) => {
             const value = preset[item.samplerID]
             const samplerItem = Samplers[item.samplerID]
             let cleanvalue = value
+
             if (typeof value === 'number')
                 if (item.samplerID === 'max_length' && max_length) {
                     cleanvalue = Math.min(value, max_length)
-                } else if (samplerItem.values.type === 'integer') cleanvalue = Math.floor(value)
+                } else if (samplerItem.values.type === 'integer') {
+                    cleanvalue = Math.floor(value)
+                }
+
             if (item.samplerID === SamplerID.DRY_SEQUENCE_BREAK) {
                 //@ts-expect-error. This is due to a migration
                 cleanvalue = (value as string).split(',')
             }
-            return { [item.externalName as SamplerID]: cleanvalue }
+
+            return {
+                [item.externalName as SamplerID]: cleanvalue,
+            }
         })
         .reduce((acc, obj) => Object.assign(acc, obj), {})
 }
 
-const buildLocalPayload = async () => {
+const buildLocalPayload = async (fields?: ContextBuilderParams) => {
     const payloadFields = getSamplerFields()
     const rep_pen = payloadFields?.['penalty_repeat']
     const reasoning = payloadFields?.['enable_thinking'] as boolean
+
     let thinkTags = {}
-    const localPreset: LlamaConfig = Llama.useLlamaPreferencesStore.getState().config
+
+    const localPreset: LlamaConfig =
+        Llama.useLlamaPreferencesStore.getState().config
+
     let prompt: undefined | string = undefined
     let mediaPaths: string[] = []
+
     const context = Llama.useLlamaModelStore.getState().context
 
-    const fields = await obtainFields()
+    const resolvedFields = fields ?? (await obtainFields())
 
-    if (!fields) {
+    if (!resolvedFields) {
         return Logger.error('Failed to build fields')
     }
 
-    const { apiConfig, ...rest } = fields
+    const { apiConfig, ...rest } = resolvedFields
 
     const completionType = apiConfig.request.completionType
+
     if (context && (await context.isMultimodalEnabled())) {
         const mtmdSupport = await context.getMultimodalSupport()
+
         if (completionType.type === 'chatCompletions') {
             completionType.supportsAudio = mtmdSupport?.audio
             completionType.supportsImages = mtmdSupport?.vision
             apiConfig.request.completionType = completionType
         }
     }
-    const hasAudio = completionType.type === 'chatCompletions' && completionType.supportsAudio
-    const hasImage = completionType.type === 'chatCompletions' && completionType.supportsImages
+
+    const hasAudio =
+        completionType.type === 'chatCompletions' &&
+        completionType.supportsAudio
+
+    const hasImage =
+        completionType.type === 'chatCompletions' &&
+        completionType.supportsImages
+
     const bufferExists = !!Chats.useChatState.getState().buffer.data
 
     if (mmkv.getBoolean(AppSettings.UseModelTemplate)) {
-        const messages = await buildChatCompletionContext({ apiConfig, ...rest })
+        const messages = await buildChatCompletionContext({
+            apiConfig,
+            ...rest,
+        })
+
         try {
             if (messages) {
                 const result = await Llama.useLlamaModelStore
@@ -111,27 +142,47 @@ const buildLocalPayload = async () => {
                         jinja: true,
                         enable_thinking: reasoning,
                     })
-                if (typeof result === 'string') prompt = result
-                // Currently not used since we dont pass in { jinja: true }
-                else if (typeof result === 'object') {
+
+                if (typeof result === 'string') {
+                    prompt = result
+                } else if (typeof result === 'object') {
                     prompt = result.prompt
                     mediaPaths = result.media_paths ?? []
+
                     if (reasoning && result.type === 'jinja') {
-                        const jinjaResult = result as JinjaFormattedChatResult
-                        const thinking_end_tag = jinjaResult.thinking_end_tag
-                        const thinking_start_tag = jinjaResult.thinking_start_tag
+                        const jinjaResult =
+                            result as JinjaFormattedChatResult
+
+                        const thinking_end_tag =
+                            jinjaResult.thinking_end_tag
+
+                        const thinking_start_tag =
+                            jinjaResult.thinking_start_tag
+
                         const thinking_forced_open = true
 
-                        if (thinking_end_tag && thinking_start_tag)
+                        if (
+                            thinking_end_tag &&
+                            thinking_start_tag
+                        ) {
                             thinkTags = {
                                 thinking_end_tag,
                                 thinking_start_tag,
                                 thinking_forced_open,
                             }
+                        }
                     }
 
-                    if (mediaPaths.length > 0 && !hasImage && !hasAudio) {
-                        Logger.warnToast(t('model.toast.mediaAddedWithoutMultimodalSupport'))
+                    if (
+                        mediaPaths.length > 0 &&
+                        !hasImage &&
+                        !hasAudio
+                    ) {
+                        Logger.warnToast(
+                            t(
+                                'model.toast.mediaAddedWithoutMultimodalSupport'
+                            )
+                        )
                     }
                 }
             }
@@ -139,38 +190,57 @@ const buildLocalPayload = async () => {
             Logger.error(`Failed to use template: ${e}`)
         }
 
-        // we assume that if the buffer is filled during completion
-        // this is a continue sequence
-        // we need to remove the trailing <close_tag> and <think> tags
         if (bufferExists && prompt) {
-            const removalList = ['<think>', ...outputPrefixes, ...commonStopStrings]
+            const removalList = [
+                '<think>',
+                ...outputPrefixes,
+                ...commonStopStrings,
+            ]
+
             let trimmedInput = prompt.trim()
+
             for (const removal of removalList) {
                 const test = removal.trim()
+
                 if (trimmedInput.endsWith(test)) {
                     const matchIndex = trimmedInput.lastIndexOf(test)
+
                     if (matchIndex !== -1) {
-                        trimmedInput = trimmedInput.slice(0, matchIndex).trim()
+                        trimmedInput = trimmedInput
+                            .slice(0, matchIndex)
+                            .trim()
                     }
                 }
             }
+
             prompt = trimmedInput
         }
     }
+
     if (!prompt) {
-        prompt = await buildTextCompletionContext({ apiConfig, ...rest })
+        prompt = await buildTextCompletionContext({
+            apiConfig,
+            ...rest,
+        })
     }
 
     if (!prompt) {
-        Logger.errorToast(t('generation.errors.failedToBuildPrompt'))
+        Logger.errorToast(
+            t('generation.errors.failedToBuildPrompt')
+        )
+
         return
     }
 
-    const finalMediaPaths = hasAudio || hasImage ? { media_paths: mediaPaths } : {}
+    const finalMediaPaths =
+        hasAudio || hasImage
+            ? { media_paths: mediaPaths }
+            : {}
 
     return {
         ...payloadFields,
-        penalize_nl: typeof rep_pen === 'number' && rep_pen > 1,
+        penalize_nl:
+            typeof rep_pen === 'number' && rep_pen > 1,
         n_threads: localPreset.threads,
         prompt: prompt ?? '',
         stop: constructStopSequence(),
@@ -181,263 +251,749 @@ const buildLocalPayload = async () => {
 }
 
 const constructStopSequence = (): string[] => {
-    // kept this helper for extendability
     return Instructs.useInstruct.getState().getStopSequence()
 }
 
 const stopGenerating = () => {
-    // kept this helper for extendability
     useInference.getState().stopGenerating()
 }
 
 const constructReplaceStrings = (): string[] => {
-    // default stop strings defined instructs
     const stops: string[] = constructStopSequence()
-    // additional stop strings based on context configuration
-    //    const output: string[] = []
-    //  return [...stops, ...output]
     return stops
 }
 
 const verifyModelLoaded = async (): Promise<boolean> => {
     const model = Llama.useLlamaModelStore.getState().model
 
-    // Model Loading Routine
     if (!model) {
-        const lastModel = Llama.useLlamaPreferencesStore.getState().lastModel
-        const autoLoad = mmkv.getBoolean(AppSettings.AutoLoadLocal)
-        // If  autoload is disabled, just return
+        const lastModel =
+            Llama.useLlamaPreferencesStore.getState().lastModel
+
+        const autoLoad = mmkv.getBoolean(
+            AppSettings.AutoLoadLocal
+        )
+
         if (!autoLoad) {
-            Logger.warnToast(t('model.toast.noModelLoaded'))
+            Logger.warnToast(
+                t('model.toast.noModelLoaded')
+            )
+
             return false
         }
 
-        // by default, autoload will attempt to load the last model used
         if (!lastModel) {
-            Logger.warnToast(t('model.toast.noAutoLoadModelSet'))
+            Logger.warnToast(
+                t('model.toast.noAutoLoadModelSet')
+            )
+
             return false
         }
 
-        // attempt to load model
         if (lastModel) {
-            Logger.infoToast(t('model.toast.autoLoadingModel', { name: lastModel.name }))
-            await Llama.useLlamaModelStore.getState().load(lastModel)
+            Logger.infoToast(
+                t('model.toast.autoLoadingModel', {
+                    name: lastModel.name,
+                })
+            )
+
+            await Llama.useLlamaModelStore
+                .getState()
+                .load(lastModel)
         }
 
-        const lastMmproj = Llama.useLlamaPreferencesStore.getState().lastMmproj
+        const lastMmproj =
+            Llama.useLlamaPreferencesStore.getState()
+                .lastMmproj
+
         if (lastMmproj) {
-            Logger.infoToast(t('model.toast.autoLoadingMMPROJ', { name: lastMmproj.name }))
-            await Llama.useLlamaModelStore.getState().loadMmproj(lastMmproj)
+            Logger.infoToast(
+                t('model.toast.autoLoadingMMPROJ', {
+                    name: lastMmproj.name,
+                })
+            )
+
+            await Llama.useLlamaModelStore
+                .getState()
+                .loadMmproj(lastMmproj)
         }
     }
+
     return true
 }
 
 export const localInference = async () => {
     try {
-        // Model Loading Routine
         if (!(await verifyModelLoaded())) {
             return stopGenerating()
         }
 
-        // verify that model has been loaded
-        const context = Llama.useLlamaModelStore.getState().context
+        const context =
+            Llama.useLlamaModelStore.getState().context
 
         if (!context) {
-            Logger.warnToast(t('model.toast.noModelLoaded'))
+            Logger.warnToast(
+                t('model.toast.noModelLoaded')
+            )
+
             stopGenerating()
             return
         }
 
         const fields = await obtainFields()
+
         if (!fields) {
             stopGenerating()
             return
         }
 
-        const payload = await buildLocalPayload()
+        const payload = await buildLocalPayload(fields)
 
         if (!payload) {
-            Logger.warnToast(t('generation.errors.failedToBuildPayload'))
+            Logger.warnToast(
+                t('generation.errors.failedToBuildPayload')
+            )
+
             stopGenerating()
             return
         }
 
-        if (mmkv.getBoolean(AppSettings.SaveLocalKV) && !KV.useKVStore.getState().kvCacheLoaded) {
-            const prompt = await Llama.useLlamaModelStore
-                .getState()
-                .tokenize(payload.prompt, payload.media_paths)
-            const result = KV.useKVStore.getState().verifyKVCache(prompt?.tokens ?? [])
+        if (
+            mmkv.getBoolean(AppSettings.SaveLocalKV) &&
+            !KV.useKVStore.getState().kvCacheLoaded
+        ) {
+            const prompt =
+                await Llama.useLlamaModelStore
+                    .getState()
+                    .tokenize(
+                        payload.prompt,
+                        payload.media_paths
+                    )
+
+            const result =
+                KV.useKVStore
+                    .getState()
+                    .verifyKVCache(
+                        prompt?.tokens ?? []
+                    )
+
             if (!result.match) {
                 Alert.alert({
                     title: 'Cache Mismatch',
-                    description: `KV Cache does not match current prompt:\n\n${result.matchLength} of ${result.cachedLength} tokens are identical.\n\nPress 'Load Anyway' if you don't mind losing the cache.`,
+                    description:
+                        `KV Cache does not match current prompt:\n\n` +
+                        `${result.matchLength} of ${result.cachedLength} ` +
+                        `tokens are identical.\n\n` +
+                        `Press 'Load Anyway' if you don't mind losing the cache.`,
+
                     buttons: [
-                        { label: 'Cancel', onPress: stopGenerating },
+                        {
+                            label: 'Cancel',
+                            onPress: stopGenerating,
+                        },
                         {
                             label: 'Load Anyway',
                             onPress: async () => {
-                                Logger.warn('Overriding KV Cache despite mismatch')
-                                const result = await Llama.useLlamaModelStore.getState().loadKV()
+                                Logger.warn(
+                                    'Overriding KV Cache despite mismatch'
+                                )
+
+                                const result =
+                                    await Llama
+                                        .useLlamaModelStore
+                                        .getState()
+                                        .loadKV()
+
                                 if (result) {
-                                    KV.useKVStore.getState().setKvCacheLoaded(true)
+                                    KV.useKVStore
+                                        .getState()
+                                        .setKvCacheLoaded(
+                                            true
+                                        )
                                 }
-                                runLocalCompletion(payload)
+
+                                runLocalCompletion(
+                                    payload
+                                )
                             },
                             type: 'warning',
                         },
                     ],
+
                     onDismiss: stopGenerating,
                 })
+
                 return
             }
 
-            const kvloadResult = await Llama.useLlamaModelStore.getState().loadKV()
+            const kvloadResult =
+                await Llama.useLlamaModelStore
+                    .getState()
+                    .loadKV()
+
             if (kvloadResult) {
-                KV.useKVStore.getState().setKvCacheLoaded(true)
+                KV.useKVStore
+                    .getState()
+                    .setKvCacheLoaded(true)
             }
         }
-        const usedTool = await runLocalToolCompletion(fields, payload).catch((error) => {
-            Logger.warn(`Local tool completion unavailable: ${JSON.stringify(error)}`)
-            return false
-        })
-        if (!usedTool) await runLocalCompletion(payload)
+
+        const chatId =
+            Chats.useChatState.getState().id
+
+        const webSearchEnabled = chatId
+            ? mmkv.getBoolean(
+                  `nexus.webSearch.${chatId}`
+              ) ?? false
+            : false
+
+        if (webSearchEnabled) {
+            const usedTool =
+                await runLocalToolCompletion(
+                    fields,
+                    payload
+                ).catch((error) => {
+                    Logger.warn(
+                        `Local tool completion unavailable: ${JSON.stringify(
+                            error
+                        )}`
+                    )
+
+                    return false
+                })
+
+            if (usedTool) return
+        }
+
+        await runLocalCompletion(payload)
     } catch (e) {
-        Logger.errorToast(t('model.toast.failedToRunLocalInference'), e)
+        Logger.errorToast(
+            t('model.toast.failedToRunLocalInference'),
+            e
+        )
+
         stopGenerating()
     }
 }
 
-const runLocalToolCompletion = async (
-    fields: ContextBuilderParams,
-    payload: NonNullable<Awaited<ReturnType<typeof buildLocalPayload>>>
-) => {
-    const context = Llama.useLlamaModelStore.getState().context
-    if (!context) return false
+const normalizeToolName = (name: unknown) => {
+    const value = String(name ?? '')
+        .trim()
+        .toLowerCase()
 
-    const messages = await buildChatCompletionContext(fields)
-    if (!messages) return false
-
-    const engineData = Llama.useLlamaPreferencesStore.getState().config
-    const baseParams: any = {
-        ...payload,
-        n_threads: engineData.threads,
-        messages,
-        tool_choice: 'auto',
-        tools: [WEB_SEARCH_TOOL],
+    if (
+        value === 'google_search' ||
+        value === 'web_search' ||
+        value === 'search_web' ||
+        value === 'search'
+    ) {
+        return 'web_search'
     }
-    delete baseParams.prompt
 
-    useInference.getState().setAbort(async () => {
-        await Llama.useLlamaModelStore.getState().stopCompletion()
-    })
+    return value
+}
 
-    const first = await Llama.useLlamaModelStore.getState().completionRaw(baseParams)
-    if (!first) return false
+const parseToolArguments = (
+    value: unknown
+): Record<string, any> => {
+    if (
+        value &&
+        typeof value === 'object'
+    ) {
+        return value as Record<string, any>
+    }
 
-    const toolCalls = first.tool_calls ?? []
-    if (toolCalls.length === 0) return false
+    if (typeof value !== 'string') {
+        return {}
+    }
 
-    const toolMessages: any[] = [...messages]
-    toolMessages.push({
-        role: 'assistant',
-        content: first.text ?? '',
-        tool_calls: toolCalls,
-    })
+    const trimmed = value.trim()
 
-    for (const call of toolCalls) {
-        const name = call?.function?.name ?? call?.name
-        if (name !== 'web_search') continue
+    if (!trimmed) return {}
 
-        let args: any = call?.function?.arguments ?? call?.arguments ?? {}
-        if (typeof args === 'string') {
-            try {
-                args = JSON.parse(args)
-            } catch {
-                args = { query: args }
+    try {
+        const parsed = JSON.parse(trimmed)
+
+        if (
+            parsed &&
+            typeof parsed === 'object'
+        ) {
+            return parsed
+        }
+    } catch {
+        // Continue with lightweight text parsing.
+    }
+
+    const queryMatch = trimmed.match(
+        /(?:\"query\"|'query'|query)\s*[:=]\s*[\"']?(.+?)[\"']?$/i
+    )
+
+    if (queryMatch?.[1]) {
+        return {
+            query: queryMatch[1].trim(),
+        }
+    }
+
+    return {
+        query: trimmed,
+    }
+}
+
+/**
+ * Gemma-family models may emit a textual tool call instead
+ * of the structured tool_calls array returned by llama.cpp.
+ *
+ * We support both:
+ *
+ * <|tool_call|>call:web_search...
+ *
+ * and:
+ *
+ * <|tool_call>call:google_search...
+ */
+const parseRawToolCalls = (text: string) => {
+    if (!text) return []
+
+    const calls: any[] = []
+
+    const callRegex =
+        /(?:<\|tool_call\|>|<\|tool_call>)\s*call:([\w.-]+)([\s\S]*?)(?:<tool_call\|>|<\|tool_call\|>|$)/gi
+
+    for (const match of text.matchAll(callRegex)) {
+        const name = normalizeToolName(match[1])
+
+        const body = String(
+            match[2] ?? ''
+        ).trim()
+
+        let args: Record<string, any> = {}
+
+        const jsonObject = body.match(
+            /\{[\s\S]*\}/
+        )
+
+        if (jsonObject?.[0]) {
+            args = parseToolArguments(
+                jsonObject[0]
+            )
+        } else {
+            const quotedParts = [
+                ...body.matchAll(
+                    /<\|"?\|>([\s\S]*?)<\|"?\|>/g
+                ),
+            ]
+
+            if (quotedParts.length > 0) {
+                args = {
+                    query: quotedParts
+                        .map((item) => item[1])
+                        .join(' ')
+                        .trim(),
+                }
+            } else {
+                args = parseToolArguments(
+                    body
+                )
             }
         }
 
-        const query = typeof args?.query === 'string' ? args.query : ''
-        const results = await searchDuckDuckGo(query)
-        const content = formatSearchResults(results)
-        toolMessages.push({
-            role: 'tool',
-            tool_call_id: call?.id ?? `web_search_${Date.now()}`,
-            name: 'web_search',
-            content,
+        calls.push({
+            id: `nexus_${name}_${calls.length}_${Date.now()}`,
+            type: 'function',
+            function: {
+                name,
+                arguments:
+                    JSON.stringify(args),
+            },
         })
     }
 
-    const final = await Llama.useLlamaModelStore.getState().completionRaw({
-        ...baseParams,
-        messages: toolMessages,
+    return calls
+}
+
+const cleanToolControlTokens = (
+    text: string
+) =>
+    text
+        .replace(
+            /<\|channel\|>/gi,
+            ''
+        )
+        .replace(
+            /<channel\|>/gi,
+            ''
+        )
+        .replace(
+            /<\|tool_call\|>/gi,
+            ''
+        )
+        .replace(
+            /<\|tool_call>/gi,
+            ''
+        )
+        .replace(
+            /<tool_call\|>/gi,
+            ''
+        )
+        .replace(
+            /<\|end\|>/gi,
+            ''
+        )
+        .trim()
+
+const runLocalToolCompletion = async (
+    fields: ContextBuilderParams,
+    payload: NonNullable<
+        Awaited<
+            ReturnType<
+                typeof buildLocalPayload
+            >
+        >
+    >
+) => {
+    const context =
+        Llama.useLlamaModelStore
+            .getState()
+            .context
+
+    if (!context) return false
+
+    const messages =
+        await buildChatCompletionContext(
+            fields
+        )
+
+    if (!messages) return false
+
+    const engineData =
+        Llama.useLlamaPreferencesStore
+            .getState()
+            .config
+
+    const baseParams: any = {
+        ...payload,
+        n_threads:
+            engineData.threads,
+        messages,
+        jinja: true,
+        tool_choice: 'auto',
         tools: [WEB_SEARCH_TOOL],
-        tool_choice: 'none',
+    }
+
+    delete baseParams.prompt
+
+    useInference
+        .getState()
+        .setAbort(async () => {
+            await Llama
+                .useLlamaModelStore
+                .getState()
+                .stopCompletion()
+        })
+
+    const first =
+        await Llama
+            .useLlamaModelStore
+            .getState()
+            .completionRaw(
+                baseParams
+            )
+
+    if (!first) return false
+
+    const structuredToolCalls =
+        Array.isArray(
+            first.tool_calls
+        )
+            ? first.tool_calls
+            : []
+
+    const rawToolCalls =
+        parseRawToolCalls(
+            first.text ?? ''
+        )
+
+    const toolCalls =
+        structuredToolCalls.length > 0
+            ? structuredToolCalls
+            : rawToolCalls
+
+    if (toolCalls.length === 0) {
+        return false
+    }
+
+    const normalizedToolCalls =
+        toolCalls.map(
+            (call: any, index: number) => {
+                const name =
+                    normalizeToolName(
+                        call?.function
+                            ?.name ??
+                            call?.name
+                    )
+
+                const args =
+                    parseToolArguments(
+                        call?.function
+                            ?.arguments ??
+                            call?.arguments
+                    )
+
+                return {
+                    id:
+                        call?.id ??
+                        `nexus_tool_${index}_${Date.now()}`,
+
+                    type: 'function',
+
+                    function: {
+                        name,
+                        arguments:
+                            JSON.stringify(
+                                args
+                            ),
+                    },
+                }
+            }
+        )
+
+    const toolMessages: any[] = [
+        ...messages,
+    ]
+
+    toolMessages.push({
+        role: 'assistant',
+        content: '',
+        tool_calls:
+            normalizedToolCalls,
     })
+
+    let executedTool = false
+
+    for (const call of normalizedToolCalls) {
+        const name =
+            normalizeToolName(
+                call?.function?.name
+            )
+
+        if (name !== 'web_search') {
+            continue
+        }
+
+        const args =
+            parseToolArguments(
+                call?.function?.arguments
+            )
+
+        const query =
+            typeof args?.query === 'string'
+                ? args.query.trim()
+                : ''
+
+        if (!query) continue
+
+        const results =
+            await searchWeb(
+                query,
+                5
+            )
+
+        const content =
+            formatSearchResults(
+                results
+            )
+
+        toolMessages.push({
+            role: 'tool',
+            tool_call_id: call.id,
+            name: 'web_search',
+            content,
+        })
+
+        executedTool = true
+    }
+
+    if (!executedTool) {
+        return false
+    }
+
+    const final =
+        await Llama
+            .useLlamaModelStore
+            .getState()
+            .completionRaw({
+                ...baseParams,
+                messages:
+                    toolMessages,
+                tools: [
+                    WEB_SEARCH_TOOL,
+                ],
+                tool_choice: 'none',
+            })
 
     if (!final) return false
 
     if (final.text) {
-        Chats.useChatState.getState().insertToBuffer(final.text)
-        useTTSStore.getState().insertBuffer(final.text)
+        const cleaned =
+            cleanToolControlTokens(
+                final.text
+            )
+
+        if (cleaned) {
+            Chats.useChatState
+                .getState()
+                .insertToBuffer(
+                    cleaned
+                )
+
+            useTTSStore
+                .getState()
+                .insertBuffer(
+                    cleaned
+                )
+        }
     }
+
     stopGenerating()
+
     return true
 }
 
 const runLocalCompletion = async (
-    payload: NonNullable<Awaited<ReturnType<typeof buildLocalPayload>>>
+    payload: NonNullable<
+        Awaited<
+            ReturnType<
+                typeof buildLocalPayload
+            >
+        >
+    >
 ) => {
     const stopRegex = RegExp(
         constructReplaceStrings()
-            .map((item) => item.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-            .join(`|`),
+            .map((item) =>
+                item.replace(
+                    /[.*+?^${}()|[\]\\]/g,
+                    '\\$&'
+                )
+            )
+            .join('|'),
         'g'
     )
 
-    const cleanStopString = (text: string) => {
-        return text.replaceAll(stopRegex, '')
+    const cleanStopString = (
+        text: string
+    ) => {
+        return text.replaceAll(
+            stopRegex,
+            ''
+        )
     }
 
-    useInference.getState().setAbort(async () => {
-        await Llama.useLlamaModelStore.getState().stopCompletion()
-    })
+    useInference
+        .getState()
+        .setAbort(async () => {
+            await Llama
+                .useLlamaModelStore
+                .getState()
+                .stopCompletion()
+        })
 
     let reasoningMode = false
-    const outputStream = (text: string) => {
-        const cleaned = cleanStopString(text)
-        Chats.useChatState.getState().insertToBuffer(cleanStopString(text))
-        /**
-         * @TODO implement think seperation for TTS
-         */
+
+    const outputStream = (
+        text: string
+    ) => {
+        const cleaned =
+            cleanToolControlTokens(
+                cleanStopString(
+                    text
+                )
+            )
+
+        Chats.useChatState
+            .getState()
+            .insertToBuffer(
+                cleaned
+            )
+
         if (reasoningMode) {
-            if (isCloseThinkTag(cleaned)) {
+            if (
+                isCloseThinkTag(
+                    cleaned
+                )
+            ) {
                 reasoningMode = false
             }
+
             return
         }
 
-        if (isOpenThinkTag(cleaned)) {
+        if (
+            isOpenThinkTag(
+                cleaned
+            )
+        ) {
             reasoningMode = true
             return
         }
-        useTTSStore.getState().insertBuffer(cleanStopString(text))
+
+        useTTSStore
+            .getState()
+            .insertBuffer(
+                cleaned
+            )
     }
 
-    const outputCompleted = (text: string, timings: CompletionTimings) => {
-        Chats.useChatState.getState().setBufferTimings(timings)
-        if (mmkv.getBoolean(AppSettings.PrintContext)) Logger.info(`Completion Output:\n${text}`)
+    const outputCompleted = (
+        text: string,
+        timings: CompletionTimings
+    ) => {
+        Chats.useChatState
+            .getState()
+            .setBufferTimings(
+                timings
+            )
+
+        if (
+            mmkv.getBoolean(
+                AppSettings.PrintContext
+            )
+        ) {
+            Logger.info(
+                `Completion Output:\n${text}`
+            )
+        }
+
         stopGenerating()
     }
 
-    const engineData = Llama.useLlamaPreferencesStore.getState().config
+    const engineData =
+        Llama.useLlamaPreferencesStore
+            .getState()
+            .config
 
-    await Llama.useLlamaModelStore
+    await Llama
+        .useLlamaModelStore
         .getState()
-        .completion({ ...payload, n_threads: engineData.threads }, outputStream, outputCompleted)
+        .completion(
+            {
+                ...payload,
+                n_threads:
+                    engineData.threads,
+            },
+            outputStream,
+            outputCompleted
+        )
         .catch((error) => {
-            Logger.errorToast(t('model.toast.failedToGenerateLocally'), JSON.stringify(error))
+            Logger.errorToast(
+                t(
+                    'model.toast.failedToGenerateLocally'
+                ),
+                JSON.stringify(
+                    error
+                )
+            )
+
             stopGenerating()
         })
 }
@@ -477,6 +1033,7 @@ const localAPIConfig: APIConfiguration = {
     request: {
         requestType: 'stream',
         samplerFields: [],
+
         completionType: {
             type: 'chatCompletions',
             userRole: 'user',
@@ -484,9 +1041,12 @@ const localAPIConfig: APIConfiguration = {
             assistantRole: 'assistant',
             contentName: 'content',
         },
+
         authHeader: 'Authorization',
         authPrefix: 'Bearer ',
-        responseParsePattern: 'choices.0.delta.content',
+        responseParsePattern:
+            'choices.0.delta.content',
+
         useStop: true,
         stopKey: 'stop',
         promptKey: 'messages',
@@ -513,90 +1073,245 @@ const localAPIConfig: APIConfiguration = {
 
 // This is the 'big orchestrator' which compiles fields from
 // the whole app to send inference requests
-const obtainFields = async (): Promise<ContextBuilderParams | void> => {
-    try {
-        const userState = Characters.useUserStore.getState()
-        const characterState = Characters.useCharacterStore.getState()
+const obtainFields =
+    async (): Promise<
+        ContextBuilderParams | void
+    > => {
+        try {
+            const userState =
+                Characters.useUserStore.getState()
 
-        const instructState = Instructs.useInstruct.getState()
+            const characterState =
+                Characters.useCharacterStore.getState()
 
-        const userCard = userState.card
-        if (!userCard) {
-            Logger.errorToast(t('generation.errors.noUser'))
-            return
-        }
+            const instructState =
+                Instructs.useInstruct.getState()
 
-        const characterCard = characterState.card
-        if (!characterCard) {
-            Logger.errorToast(t('generation.errors.noCharacter'))
-            return
-        }
-        const chatId = await Chats.useChatState.getState().id
-        if (!chatId) {
-            Logger.errorToast(t('generation.errors.noActiveChat'))
-            return
-        }
+            const userCard =
+                userState.card
 
-        const messages = (await Chats.db.query.chat(chatId))?.messages
-        if (!messages) {
-            Logger.errorToast(t('generation.errors.noChatFound'))
-            return
-        }
-
-        const apiValues = localAPIValues
-        if (!apiValues) {
-            Logger.warnToast(t('generation.errors.noActiveAPI'))
-            return
-        }
-
-        const apiConfig = localAPIConfig
-        if (!apiConfig) {
-            Logger.errorToast(
-                t('generation.errors.configurationNotFound', { name: apiValues?.configName })
-            )
-            return
-        }
-
-        const engineData = Llama.useLlamaPreferencesStore.getState().config
-        const samplers = SamplersManager.getCurrentSampler()
-
-        const instructLength = engineData.context_length
-        const length = Math.max(instructLength - samplers.genamt, 0)
-
-        return {
-            apiConfig: Object.assign({}, apiConfig),
-            apiValues: Object.assign({}, apiValues),
-
-            instruct: instructState.replacedMacros(),
-            character: Object.assign({}, characterCard),
-            user: Object.assign({}, userCard),
-            messages: [...messages],
-            chatTokenizer: async (entry, index) => {
-                // IMPORTANT - we use -1 for dummy entries
-                if (entry.id === -1) return 0
-                const [activeSwipe] = entry.swipes.filter((item) => item.active)
-                if (!activeSwipe) return 0
-                const tokenCount = activeSwipe.token_count ?? 0
-                if (tokenCount === 0 && activeSwipe.swipe.length > 0) {
-                    // assume that token length hasnt been calculated
-                    const tokenCount = await Llama.useLlamaModelStore.getState().tokenLength(
-                        activeSwipe.swipe,
-                        entry.attachments.map((item) => item.uri)
+            if (!userCard) {
+                Logger.errorToast(
+                    t(
+                        'generation.errors.noUser'
                     )
-                    Chats.db.mutate.updateSwipeTokenLength(activeSwipe.id, tokenCount)
-                }
+                )
 
-                return tokenCount
-            },
-            tokenizer: Llama.useLlamaModelStore.getState().tokenLength,
-            maxLength: length,
-            cache: {
-                userCache: await userState.getCache(characterCard.name),
-                characterCache: await characterState.getCache(userCard.name),
-                instructCache: await instructState.getCache(characterCard.name, userCard.name),
-            },
+                return
+            }
+
+            const characterCard =
+                characterState.card
+
+            if (!characterCard) {
+                Logger.errorToast(
+                    t(
+                        'generation.errors.noCharacter'
+                    )
+                )
+
+                return
+            }
+
+            const chatId =
+                await Chats.useChatState
+                    .getState()
+                    .id
+
+            if (!chatId) {
+                Logger.errorToast(
+                    t(
+                        'generation.errors.noActiveChat'
+                    )
+                )
+
+                return
+            }
+
+            const messages =
+                (
+                    await Chats.db.query.chat(
+                        chatId
+                    )
+                )?.messages
+
+            if (!messages) {
+                Logger.errorToast(
+                    t(
+                        'generation.errors.noChatFound'
+                    )
+                )
+
+                return
+            }
+
+            const apiValues =
+                localAPIValues
+
+            if (!apiValues) {
+                Logger.warnToast(
+                    t(
+                        'generation.errors.noActiveAPI'
+                    )
+                )
+
+                return
+            }
+
+            const apiConfig =
+                localAPIConfig
+
+            if (!apiConfig) {
+                Logger.errorToast(
+                    t(
+                        'generation.errors.configurationNotFound',
+                        {
+                            name: apiValues?.configName,
+                        }
+                    )
+                )
+
+                return
+            }
+
+            const engineData =
+                Llama
+                    .useLlamaPreferencesStore
+                    .getState()
+                    .config
+
+            const samplers =
+                SamplersManager
+                    .getCurrentSampler()
+
+            const instructLength =
+                engineData.context_length
+
+            const length = Math.max(
+                instructLength -
+                    samplers.genamt,
+                0
+            )
+
+            return {
+                apiConfig:
+                    Object.assign(
+                        {},
+                        apiConfig
+                    ),
+
+                apiValues:
+                    Object.assign(
+                        {},
+                        apiValues
+                    ),
+
+                instruct:
+                    instructState.replacedMacros(),
+
+                character:
+                    Object.assign(
+                        {},
+                        characterCard
+                    ),
+
+                user:
+                    Object.assign(
+                        {},
+                        userCard
+                    ),
+
+                messages: [...messages],
+
+                chatTokenizer: async (
+                    entry,
+                    index
+                ) => {
+                    // IMPORTANT - we use -1 for dummy entries
+                    if (entry.id === -1) {
+                        return 0
+                    }
+
+                    const [
+                        activeSwipe,
+                    ] =
+                        entry.swipes.filter(
+                            (item) =>
+                                item.active
+                        )
+
+                    if (!activeSwipe) {
+                        return 0
+                    }
+
+                    const tokenCount =
+                        activeSwipe.token_count ??
+                        0
+
+                    if (
+                        tokenCount === 0 &&
+                        activeSwipe.swipe
+                            .length > 0
+                    ) {
+                        const tokenCount =
+                            await Llama
+                                .useLlamaModelStore
+                                .getState()
+                                .tokenLength(
+                                    activeSwipe.swipe,
+                                    entry.attachments.map(
+                                        (item) =>
+                                            item.uri
+                                    )
+                                )
+
+                        Chats.db.mutate
+                            .updateSwipeTokenLength(
+                                activeSwipe.id,
+                                tokenCount
+                            )
+                    }
+
+                    return tokenCount
+                },
+
+                tokenizer:
+                    Llama
+                        .useLlamaModelStore
+                        .getState()
+                        .tokenLength,
+
+                maxLength: length,
+
+                cache: {
+                    userCache:
+                        await userState.getCache(
+                            characterCard.name
+                        ),
+
+                    characterCache:
+                        await characterState.getCache(
+                            userCard.name
+                        ),
+
+                    instructCache:
+                        await instructState.getCache(
+                            characterCard.name,
+                            userCard.name
+                        ),
+                },
+
+                // Restore the same DataSource architecture
+                // used by remote/API inference for local models.
+                dataSources:
+                    await getDataSources(),
+            }
+        } catch (e) {
+            Logger.errorToast(
+                t(
+                    'generation.errors.failedToOrchestrateRequestBuild'
+                ),
+                e
+            )
         }
-    } catch (e) {
-        Logger.errorToast(t('generation.errors.failedToOrchestrateRequestBuild'), e)
-    }
-    }
+        }
