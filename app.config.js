@@ -55,6 +55,7 @@ module.exports = {
                     ],
                 },
             ],
+
             [
                 'expo-build-properties',
                 {
@@ -64,10 +65,21 @@ module.exports = {
                         enableProguardInReleaseBuilds: true,
                         enableShrinkResourcesInReleaseBuilds: true,
                         useLegacyPackaging: true,
+
+                        // The preview APK is intended for physical Android
+                        // devices such as the Galaxy S23+.
+                        // Restricting the native build to ARM64 avoids
+                        // compiling unnecessary x86/x86_64 llama binaries.
+                        buildArchs:
+                            process.env.EAS_BUILD_PROFILE === 'preview'
+                                ? ['arm64-v8a']
+                                : undefined,
+
                         extraProguardRules: '-keep class com.rnllama.** { *; }',
                     },
                 },
             ],
+
             [
                 'expo-splash-screen',
                 {
@@ -76,30 +88,37 @@ module.exports = {
                     imageWidth: 200,
                 },
             ],
+
             [
                 'expo-notifications',
                 {
                     icon: './assets/images/notification.png',
                 },
             ],
+
             [
                 './expo-build-plugins/androidattributes.plugin.js',
                 {
                     'android:largeHeap': true,
                 },
             ],
+
             ['@vali98/react-native-process-text', { label: 'Ask In ChatterUi' }],
+
             [
                 'expo-camera',
                 {
                     cameraPermission: 'Allow ChatterUI to access your camera',
                 },
             ],
+
             ['expo-sqlite', { withSQLiteVecExtension: true }],
+
             [
                 'expo-image-picker',
                 {
-                    photosPermission: 'ChatterUI requires image permissions for vision models',
+                    photosPermission:
+                        'ChatterUI requires image permissions for vision models',
                     colors: {
                         cropToolbarColor: '#000000',
                     },
@@ -110,14 +129,17 @@ module.exports = {
                     },
                 },
             ],
+
             'expo-localization',
             'expo-router',
             'expo-font',
             'expo-image',
+
             './expo-build-plugins/bgactions.plugin.js',
             './expo-build-plugins/usercert.plugin.js',
             './expo-build-plugins/rnllama.plugin.js',
             './expo-build-plugins/copyhtp.plugin.js',
+
             '@react-native-vector-icons/ant-design',
             '@react-native-vector-icons/octicons',
             '@react-native-vector-icons/material-icons',
@@ -132,6 +154,7 @@ module.exports = {
             router: {
                 origin: false,
             },
+
             eas: {
                 projectId: 'ecc89c53-6265-4394-9aac-d34a1dc80fbc',
             },
