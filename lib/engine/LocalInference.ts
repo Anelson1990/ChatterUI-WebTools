@@ -599,4 +599,4 @@ const obtainFields = async (): Promise<ContextBuilderParams | void> => {
     } catch (e) {
         Logger.errorToast(t('generation.errors.failedToOrchestrateRequestBuild'), e)
     }
-}
+    }
