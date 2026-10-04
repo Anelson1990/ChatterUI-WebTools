@@ -14,7 +14,12 @@ const formatMemory = (memory: Memory): string => {
 
 const createNexusMemoryDataSource = (): DataSource => ({
     name: MEMORY_SOURCE_NAME,
-    priority: 10,
+
+    // Memory is supplemental. It must never take priority
+    // over the normal character/chat context.
+    priority: 100,
+
+    // Zero means opportunistic in the existing ContextBuilder.
     tokenBudget: 0,
 
     retrieve: async (
@@ -23,83 +28,153 @@ const createNexusMemoryDataSource = (): DataSource => ({
         maxLength,
         currentLength,
     ) => {
-        if (!messages || messages.length === 0) return []
-
-        const lastMessage = messages[messages.length - 1]
-
-        if (
-            !lastMessage ||
-            lastMessage.role !== 'user'
-        ) {
-            return []
-        }
-
-        const query =
-            lastMessage.content?.trim()
-
-        if (!query) return []
-
-        let memories: Memory[] = []
+        /*
+         * Memory must NEVER be allowed to break normal inference.
+         * Every operation is protected so a memory/database/tokenizer
+         * problem simply results in no memory being injected.
+         */
 
         try {
-            memories =
-                searchMemories(
-                    query,
-                    MAX_MEMORY_RESULTS
-                )
-        } catch {
-            return []
-        }
+            if (
+                !Array.isArray(messages) ||
+                messages.length === 0
+            ) {
+                return []
+            }
 
-        if (memories.length === 0) {
-            return []
-        }
+            const lastMessage =
+                messages[messages.length - 1]
 
-        const content =
-            memories
-                .map(formatMemory)
-                .join('\n')
+            if (
+                !lastMessage ||
+                lastMessage.role !== 'user'
+            ) {
+                return []
+            }
 
-        if (!content.trim()) {
-            return []
-        }
+            /*
+             * Character cards and multimodal messages can potentially
+             * provide content in a non-string format. Memory retrieval
+             * only needs plain text.
+             */
+            const rawContent =
+                typeof lastMessage.content === 'string'
+                    ? lastMessage.content
+                    : ''
 
-        let tokenLength = 0
+            const query =
+                rawContent.trim()
 
-        try {
-            tokenLength =
-                await params.tokenizer(
-                    content
-                )
-        } catch {
-            return []
-        }
+            if (!query) {
+                return []
+            }
 
-        if (tokenLength <= 0) {
-            return []
-        }
+            /*
+             * Search the local memory database.
+             *
+             * If SQLite has any problem, silently skip memory rather
+             * than allowing it to interrupt generation.
+             */
+            let memories: Memory[] = []
 
-        if (
-            currentLength +
-                tokenLength >
-            maxLength
-        ) {
-            return []
-        }
+            try {
+                memories =
+                    searchMemories(
+                        query,
+                        MAX_MEMORY_RESULTS,
+                    )
+            } catch {
+                return []
+            }
 
-        return [
-            {
-                content,
-                source:
-                    MEMORY_SOURCE_NAME,
-                tokenLength,
-                position: {
-                    type: 'relative',
-                    location:
-                        'afterSystem',
+            if (
+                !Array.isArray(memories) ||
+                memories.length === 0
+            ) {
+                return []
+            }
+
+            const content =
+                memories
+                    .map(formatMemory)
+                    .filter(
+                        (item) =>
+                            item.trim().length > 0
+                    )
+                    .join('\n')
+
+            if (!content.trim()) {
+                return []
+            }
+
+            /*
+             * Ask the existing tokenizer how much room the memory
+             * insertion requires.
+             *
+             * If tokenization fails, skip memory.
+             */
+            let tokenLength = 0
+
+            try {
+                tokenLength =
+                    await params.tokenizer(
+                        content
+                    )
+            } catch {
+                return []
+            }
+
+            if (
+                !Number.isFinite(tokenLength) ||
+                tokenLength <= 0
+            ) {
+                return []
+            }
+
+            /*
+             * Never allow memory to consume the entire context.
+             */
+            if (
+                !Number.isFinite(maxLength) ||
+                !Number.isFinite(currentLength)
+            ) {
+                return []
+            }
+
+            if (
+                currentLength + tokenLength >
+                maxLength
+            ) {
+                return []
+            }
+
+            return [
+                {
+                    content,
+                    source:
+                        MEMORY_SOURCE_NAME,
+                    tokenLength,
+
+                    /*
+                     * Inject memory alongside the existing system
+                     * context without modifying the character card,
+                     * chat messages, or model settings.
+                     */
+                    position: {
+                        type: 'relative',
+                        location: 'afterSystem',
+                    },
                 },
-            },
-        ]
+            ]
+        } catch {
+            /*
+             * Absolute final safety net.
+             *
+             * A memory failure must NEVER become a chat-generation
+             * failure.
+             */
+            return []
+        }
     },
 })
 
