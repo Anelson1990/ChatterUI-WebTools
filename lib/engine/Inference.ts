@@ -1,332 +1,150 @@
-import { t } from 'i18next'
-import BackgroundService from 'react-native-background-actions'
+const runLocalToolCompletion = async (
+    fields: ContextBuilderParams,
+    payload: NonNullable<Awaited<ReturnType<typeof buildLocalPayload>>>
+) => {
+    const context = Llama.useLlamaModelStore.getState().context
 
-import { ChatSwipe } from '@db/schema'
-import { AppSettings } from '@lib/constants/GlobalValues'
-import { isCloseThinkTag, isOpenThinkTag } from '@lib/markdown/ThinkTags'
-import { useAppModeStore } from '@lib/state/AppMode'
-import { Chats, useInference } from '@lib/state/Chat'
-import { Instructs } from '@lib/state/Instructs'
-import { SamplersManager } from '@lib/state/SamplerState'
-import { useTTSStore } from '@lib/state/TTS'
-import { mmkv } from '@lib/storage/MMKV'
+    if (!context) return false
 
-import { Characters } from '../state/Characters'
-import { Logger } from '../state/Logger'
-import { APIBuilderParams, buildAndSendRequest } from './API/APIBuilder'
-import { APIConfiguration, APIValues } from './API/APIBuilder.types'
-import { APIManager } from './API/APIManagerState'
-import { getDataSources } from './DataSources'
-import { localInference } from './LocalInference'
-import { Tokenizer } from './Tokenizer'
+    const messages = await buildChatCompletionContext(fields)
 
-export async function regenerateResponse(swipe: ChatSwipe, regenCache: boolean = true) {
-    Logger.info('Regenerate Response' + (regenCache ? '' : ' , Resetting Message'))
+    if (!messages) return false
 
-    let replacement = ''
-    if (regenCache)
-        replacement = swipe.reset_length ? swipe.swipe.substring(0, swipe.reset_length) : ''
+    const engineData =
+        Llama.useLlamaPreferencesStore.getState().config
 
-    Chats.useChatState.getState().setBuffer({ data: replacement })
-    await Chats.db.mutate.updateChatSwipe(swipe.id, replacement, {
-        updateFinished: true,
-        updateStarted: true,
-        resetTimings: true,
+    const baseParams: any = {
+        ...payload,
+        n_threads: engineData.threads,
+        messages,
+        jinja: true,
+        tool_choice: 'auto',
+        tools: [WEB_SEARCH_TOOL],
+    }
+
+    delete baseParams.prompt
+
+    useInference.getState().setAbort(async () => {
+        await Llama.useLlamaModelStore.getState().stopCompletion()
     })
 
-    await generateResponse(swipe.id)
-}
+    const first =
+        await Llama.useLlamaModelStore
+            .getState()
+            .completionRaw(baseParams)
 
-export async function continueResponse(swipe: ChatSwipe) {
-    Logger.info(`Continuing Response`)
-    await Chats.db.mutate.updateSwipeResetLength(swipe.id, swipe.swipe.length)
-    Chats.useChatState.getState().insertToBuffer(swipe.swipe)
-    await generateResponse(swipe.id)
-}
+    if (!first) return false
 
-const completionTaskOptions = {
-    taskName: 'chatterui_completion_task',
-    taskTitle: 'Running completion...',
-    taskDesc: 'ChatterUI is running a completion task',
-    taskIcon: {
-        name: 'ic_launcher',
-        type: 'mipmap',
-    },
-    color: '#403737',
-    linkingURI: 'chatterui://',
-    progressBar: {
-        max: 1,
-        value: 0,
-        indeterminate: true,
-    },
-}
+    const structuredToolCalls = Array.isArray(first.tool_calls)
+        ? first.tool_calls
+        : []
 
-export async function generateResponse(swipeId: number) {
-    if (useInference.getState().nowGenerating) {
-        Logger.infoToast(t('generation.errors.generationAlreadyInProgress'))
-        return
+    const rawToolCalls = parseRawToolCalls(first.text ?? '')
+
+    const toolCalls =
+        structuredToolCalls.length > 0
+            ? structuredToolCalls
+            : rawToolCalls
+
+    if (toolCalls.length === 0) return false
+
+    const searchBlocks: string[] = []
+    let executedTool = false
+
+    for (const call of toolCalls) {
+        const name = normalizeToolName(
+            call?.function?.name ?? call?.name
+        )
+
+        if (name !== 'web_search') continue
+
+        let args: any =
+            call?.function?.arguments ??
+            call?.arguments ??
+            {}
+
+        args = parseToolArguments(args)
+
+        const query =
+            typeof args?.query === 'string'
+                ? args.query.trim()
+                : ''
+
+        if (!query) continue
+
+        const results = await searchWeb(query, 5)
+
+        const formatted = formatSearchResults(results)
+
+        searchBlocks.push(
+            `SEARCH QUERY: ${query}\n\n${formatted}`
+        )
+
+        executedTool = true
     }
-    useInference.getState().startGenerating(swipeId)
-    Logger.info(`Obtaining response.`)
-    const appMode = useAppModeStore.getState().appMode
 
-    if (appMode === 'local') {
-        await BackgroundService.start(localInference, completionTaskOptions)
-    } else {
-        await BackgroundService.start(chatInferenceStream, completionTaskOptions)
-    }
-}
-// TODO: Use this
-/*
-const useGenerateResponse = () => {
-    const startGenerating = Chats.useChatState((state) => state.startGenerating)
-    const nowGenerating = useInference((state) => state.nowGenerating)
-    const appMode = useAppModeStore((state) => state.appMode)
+    if (!executedTool) return false
 
-    const generateResponse = useCallback(
-        async (swipeId: number) => {
-            if (nowGenerating) {
-                Logger.infoToast(t('generation.errors.generationAlreadyInProgress'))
-                return
-            }
-            startGenerating(swipeId)
-            Logger.info(`Obtaining response.`)
-            const process = appMode === 'local' ? localInference : chatInferenceStream
-            await BackgroundService.start(process, completionTaskOptions)
+    /*
+     * IMPORTANT:
+     *
+     * Do not send the results back as a native "tool" message.
+     *
+     * Some local Jinja/Gemma templates do not correctly interpret
+     * OpenAI-style tool messages. Instead, explicitly inject the
+     * research into the conversation as context the model can read.
+     */
+
+    const researchContext = `
+WEB SEARCH RESULTS
+==================
+
+${searchBlocks.join('\n\n--------------------\n\n')}
+
+==================
+Use the web search results above as research for the user's question.
+
+Answer the user's original question directly.
+Do not mention internal tool calls.
+Do not output tool-call syntax.
+Do not invent information that is not supported by the available results.
+`
+
+    const finalMessages: any[] = [
+        ...messages,
+        {
+            role: 'user',
+            content: researchContext,
         },
-        [nowGenerating, appMode, startGenerating]
-    )
+    ]
 
-    return generateResponse
-}*/
+    const final =
+        await Llama.useLlamaModelStore
+            .getState()
+            .completionRaw({
+                ...baseParams,
+                messages: finalMessages,
+                tools: [],
+                tool_choice: 'none',
+            })
 
-async function chatInferenceStream() {
-    const fields = await obtainFields()
-    const stop = () => useInference.getState().stopGenerating()
-    if (!fields) {
-        Logger.error('Chat Inference Failed')
-        stop()
-        return
-    }
-    fields.stopGenerating = stop
-    let reasoningMode: 'structured' | 'raw' | null = null
-    fields.onData = (output) => {
-        if (!reasoningMode && output.type === 'reasoning') {
-            Chats.useChatState.getState().insertToBuffer('<think>')
-            reasoningMode = 'raw'
+    if (!final) return false
+
+    if (final.text) {
+        const cleaned = cleanToolControlTokens(final.text)
+
+        if (cleaned) {
+            Chats.useChatState
+                .getState()
+                .insertToBuffer(cleaned)
+
+            useTTSStore
+                .getState()
+                .insertBuffer(cleaned)
         }
-
-        if (reasoningMode === 'raw' && output.type !== 'reasoning' && reasoningMode === 'raw') {
-            Chats.useChatState.getState().insertToBuffer('</think>\n')
-            reasoningMode = null
-        }
-
-        /**
-         * This is a naive implementation that expects output tags to be full tokens
-         * Most LLMs are trained so that think_start and think_end tokens are not composite
-         */
-        if (!reasoningMode && output.type === 'text' && isOpenThinkTag(output.type)) {
-            reasoningMode = 'structured'
-        }
-
-        if (
-            reasoningMode === 'structured' &&
-            output.type === 'text' &&
-            isCloseThinkTag(output.type)
-        ) {
-            reasoningMode = null
-        }
-
-        Chats.useChatState.getState().insertToBuffer(output.content)
-
-        /**
-         * considerations
-         * - add tool calls
-         */
-        if (!reasoningMode) useTTSStore.getState().insertBuffer(output.content)
     }
 
-    fields.onEnd = async () => {
-        const chatId = Chats.useChatState.getState().id
-        if (!chatId) return
-        const chatName = await Chats.db.query.chatName(chatId)
-        if (!mmkv.getBoolean(AppSettings.AutoGenerateTitle) || chatName !== 'New Chat') return
-        Logger.info('Generating Title')
-        titleGeneratorStream(chatId)
-    }
-    const abort = await buildAndSendRequest(fields)
-    useInference.getState().setAbort(() => {
-        Logger.debug('Running Abort')
-        abort?.()
-    })
-}
+    stopGenerating()
 
-const titleGeneratorStream = async (chatId: number) => {
-    const fields = await obtainFields()
-    if (!fields) {
-        Logger.error('Title Generation Failed')
-        return
-    }
-    fields.samplers.genamt = 50
-    fields.samplers.reasoning_max_tokens = 0
-    fields.samplers.reasoning_effort = 'low'
-    fields.samplers.reasoning_exclude = true
-    let titleOutput = ''
-    fields.onData = (output) => {
-        if (output.type === 'text') titleOutput += output.content
-    }
-
-    fields.onEnd = () => {
-        Logger.debug('Autogenerated Name: ' + titleOutput)
-        if (titleOutput)
-            Chats.db.mutate.renameChat(
-                chatId,
-                titleOutput
-                    .trim()
-                    .replace(/["'.*]/g, '')
-                    .replace(/\b\w/g, (char) => char.toUpperCase())
-            )
-        else Logger.warn('Autogenerated name was blank.')
-    }
-    const entry = {
-        id: -1,
-        chat_id: -1,
-        name: '',
-        is_user: true,
-        order: 0,
-        swipe_id: 0,
-        swipes: [
-            {
-                id: -1,
-                entry_id: -1,
-                swipe: 'Generate a short 2-4 word title for this chat. Only Respond with the title and nothing else.',
-                send_date: new Date(),
-                gen_started: new Date(),
-                gen_finished: new Date(),
-                timings: null,
-                active: true,
-                token_length: null,
-                reset_length: null,
-            },
-        ],
-        attachments: [],
-    }
-    fields.messages.push(entry)
-
-    await buildAndSendRequest(fields)
-}
-
-const getModelContextLength = (config: APIConfiguration, values: APIValues): number | undefined => {
-    const keys = config.model.contextSizeParser.split('.')
-    const result = keys.reduce((acc, key) => acc?.[key], values.model)
-    return Number.isInteger(result) ? result : undefined
-}
-
-// This is the 'big orchestrator' which compiles fields from
-// the whole app to send inference requests
-async function obtainFields(): Promise<APIBuilderParams | void> {
-    try {
-        const userState = Characters.useUserStore.getState()
-        const characterState = Characters.useCharacterStore.getState()
-        const apiState = APIManager.useConnectionsStore.getState()
-        const instructState = Instructs.useInstruct.getState()
-
-        const userCard = userState.card
-        if (!userCard) {
-            Logger.errorToast(t('generation.errors.noUser'))
-            return
-        }
-
-        const characterCard = characterState.card
-        if (!characterCard) {
-            Logger.errorToast(t('generation.errors.noCharacter'))
-            return
-        }
-
-        const chatId = Chats.useChatState.getState().id
-        if (!chatId) {
-            Logger.errorToast(t('generation.errors.noActiveChat'))
-            return
-        }
-
-        const messages = (await Chats.db.query.chat(chatId))?.messages
-        if (!messages) {
-            Logger.errorToast(t('generation.errors.noChatFound'))
-            return
-        }
-
-        const apiValues = apiState.values.find((item, index) => index === apiState.activeIndex)
-        if (!apiValues) {
-            Logger.warnToast(t('generation.errors.noActiveAPI'))
-            return
-        }
-
-        const configs = apiState.getTemplates().filter((item) => item.name === apiValues.configName)
-
-        const apiConfig = configs[0]
-        if (!apiConfig) {
-            Logger.errorToast(
-                t('generation.errors.configurationNotFound', { name: apiValues?.configName })
-            )
-            return
-        }
-        const samplers = SamplersManager.getCurrentSampler()
-        const modelLengthField = getModelContextLength(apiConfig, apiValues)
-        const instructLength = samplers.max_length as number
-        const modelLength = modelLengthField ?? (instructLength as number)
-        const length = apiConfig.model.useModelContextLength
-            ? Math.min(modelLength, instructLength)
-            : instructLength - (samplers.genamt as number)
-
-        let stopSequence = instructState.getStopSequence()
-        const stopSequenceLimit = apiConfig.request.stopSequenceLimit
-        if (stopSequenceLimit && stopSequence?.length > stopSequenceLimit) {
-            stopSequence = stopSequence.slice(0, stopSequenceLimit)
-            Logger.warn('Stop sequence length exceeds defined stopSequenceLimit')
-        }
-        const tokenizer = Tokenizer.getTokenizer()
-
-        const dataSources = await getDataSources()
-
-        return {
-            apiConfig: Object.assign({}, apiConfig),
-            apiValues: Object.assign({}, apiValues),
-            onData: () => {},
-            onEnd: () => {},
-            instruct: instructState.replacedMacros(),
-            samplers: Object.assign({}, samplers),
-            character: Object.assign({}, characterCard),
-            user: Object.assign({}, userCard),
-            messages: [...messages],
-            stopSequence: stopSequence,
-            stopGenerating: () => {},
-            chatTokenizer: async (entry, index) => {
-                // IMPORTANT - we use -1 for dummy entries
-                if (entry.id === -1) return 0
-                const [activeSwipe] = entry.swipes.filter((item) => item.active)
-                if (!activeSwipe) return 0
-                const tokenCount = activeSwipe.token_count ?? 0
-                if (tokenCount === 0 && activeSwipe.swipe.length > 0) {
-                    // assume that token length hasnt been calculated
-                    const tokenCount = await tokenizer(
-                        activeSwipe.swipe,
-                        entry.attachments.map((item) => item.uri)
-                    )
-                    await Chats.db.mutate.updateSwipeTokenLength(activeSwipe.id, tokenCount)
-                }
-                return activeSwipe.token_count ?? 0
-            },
-            tokenizer: tokenizer,
-            maxLength: length,
-            cache: {
-                userCache: await userState.getCache(characterCard.name),
-                characterCache: await characterState.getCache(userCard.name),
-                instructCache: await instructState.getCache(characterCard.name, userCard.name),
-            },
-            dataSources: dataSources,
-        }
-    } catch (e) {
-        Logger.stackTrace(e)
-        Logger.errorToast(t('generation.errors.failedToOrchestrateRequestBuild'), e)
-    }
+    return true
 }
