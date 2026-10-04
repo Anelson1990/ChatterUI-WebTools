@@ -4,10 +4,10 @@ const IS_PREVIEW = process.env.EAS_BUILD_PROFILE === 'preview'
 module.exports = {
     expo: {
         name: IS_DEV
-            ? 'ChatterUI (DEV)'
+            ? 'NEXUS (DEV)'
             : IS_PREVIEW
-                ? 'ChatterUI Test'
-                : 'ChatterUI',
+                ? 'NEXUS Test'
+                : 'NEXUS',
 
         newArchEnabled: true,
         slug: 'ChatterUI',
@@ -25,15 +25,22 @@ module.exports = {
                 tinted: './assets/images/icon.png',
             },
             supportsTablet: true,
-            package: IS_DEV ? 'com.Vali98.ChatterUIDev' : 'com.Vali98.ChatterUI',
-            bundleIdentifier: IS_DEV ? 'com.Vali98.ChatterUIDev' : 'com.Vali98.ChatterUI',
+            package: IS_DEV
+                ? 'com.Vali98.ChatterUIDev'
+                : 'com.Vali98.ChatterUI',
+            bundleIdentifier: IS_DEV
+                ? 'com.Vali98.ChatterUIDev'
+                : 'com.Vali98.ChatterUI',
         },
 
         android: {
             adaptiveIcon: {
-                foregroundImage: './assets/images/adaptive-icon-foreground.png',
-                backgroundImage: './assets/images//adaptive-icon-background.png',
-                monochromeImage: './assets/images/adaptive-icon-foreground.png',
+                foregroundImage:
+                    './assets/images/adaptive-icon-foreground.png',
+                backgroundImage:
+                    './assets/images//adaptive-icon-background.png',
+                monochromeImage:
+                    './assets/images/adaptive-icon-foreground.png',
                 backgroundColor: '#000',
             },
 
@@ -81,7 +88,8 @@ module.exports = {
 
                         // Build only ARM64 for the preview APK.
                         buildArchs:
-                            process.env.EAS_BUILD_PROFILE === 'preview'
+                            process.env.EAS_BUILD_PROFILE ===
+                            'preview'
                                 ? ['arm64-v8a']
                                 : undefined,
 
@@ -114,13 +122,18 @@ module.exports = {
                 },
             ],
 
-            ['@vali98/react-native-process-text', { label: 'Ask In ChatterUi' }],
+            [
+                '@vali98/react-native-process-text',
+                {
+                    label: 'Ask In NEXUS',
+                },
+            ],
 
             [
                 'expo-camera',
                 {
                     cameraPermission:
-                        'Allow ChatterUI to access your camera',
+                        'Allow NEXUS to access your camera',
                 },
             ],
 
@@ -130,7 +143,7 @@ module.exports = {
                 'expo-image-picker',
                 {
                     photosPermission:
-                        'ChatterUI requires image permissions for vision models',
+                        'NEXUS requires image permissions for vision models',
                     colors: {
                         cropToolbarColor: '#000000',
                     },
