@@ -1,10 +1,9 @@
 import {
     searchMemories,
-    getRecentMemories,
     type Memory,
 } from '@lib/memory/Memory'
 
-import { DataSource, DataSourceResult } from './types'
+import { DataSource } from './types'
 
 const MEMORY_SOURCE_NAME = 'nexus_memory'
 
@@ -17,12 +16,10 @@ const formatMemory = (memory: Memory): string => {
 const createNexusMemoryDataSource = (): DataSource => ({
     name: MEMORY_SOURCE_NAME,
 
-    // Memory should be available early, but character examples and
-    // other higher-priority context sources remain independent.
+    // Memory is intentionally opportunistic.
+    // It receives whatever context budget remains after
+    // the normal character/instruction/lorebook sources.
     priority: 10,
-
-    // Memory is retrieved opportunistically rather than reserving a
-    // fixed block of the context window.
     tokenBudget: 0,
 
     retrieve: async (
@@ -30,22 +27,23 @@ const createNexusMemoryDataSource = (): DataSource => ({
         messages,
         maxLength,
         currentLength,
-        tokenBudget,
-        lastMessageReached
-    ): Promise<DataSourceResult[]> => {
-        if (!lastMessageReached) return []
-
+    ) => {
         if (!messages || messages.length === 0) {
             return []
         }
 
-        const lastMessage = messages[messages.length - 1]
+        const lastMessage =
+            messages[messages.length - 1]
 
-        if (!lastMessage || lastMessage.role !== 'user') {
+        if (
+            !lastMessage ||
+            lastMessage.role !== 'user'
+        ) {
             return []
         }
 
-        const query = lastMessage.content?.trim()
+        const query =
+            lastMessage.content?.trim()
 
         if (!query) {
             return []
@@ -54,15 +52,14 @@ const createNexusMemoryDataSource = (): DataSource => ({
         let memories: Memory[] = []
 
         try {
-            memories = searchMemories(query, MAX_MEMORY_RESULTS)
-
-            // If there is no direct textual match, use a small set of
-            // important/recent memories as a fallback.
-            if (memories.length === 0) {
-                memories = getRecentMemories(MAX_MEMORY_RESULTS)
-            }
+            memories =
+                searchMemories(
+                    query,
+                    MAX_MEMORY_RESULTS
+                )
         } catch {
-            // Memory must never prevent normal chat generation.
+            // Memory retrieval must never prevent
+            // normal chat generation.
             return []
         }
 
@@ -81,10 +78,13 @@ const createNexusMemoryDataSource = (): DataSource => ({
         let tokenLength = 0
 
         try {
-            tokenLength = await params.tokenizer(content)
+            tokenLength =
+                await params.tokenizer(
+                    content
+                )
         } catch {
-            // If tokenization fails, skip memory rather than breaking
-            // the normal context-building process.
+            // If tokenization fails, simply omit
+            // memory from this request.
             return []
         }
 
@@ -92,18 +92,26 @@ const createNexusMemoryDataSource = (): DataSource => ({
             return []
         }
 
-        if (currentLength + tokenLength > maxLength) {
+        // ContextBuilder already calculates the remaining
+        // opportunistic budget for this source.
+        if (
+            currentLength +
+                tokenLength >
+            maxLength
+        ) {
             return []
         }
 
         return [
             {
                 content,
-                source: MEMORY_SOURCE_NAME,
+                source:
+                    MEMORY_SOURCE_NAME,
                 tokenLength,
                 position: {
                     type: 'relative',
-                    location: 'afterSystem',
+                    location:
+                        'afterSystem',
                 },
             },
         ]
