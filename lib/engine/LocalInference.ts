@@ -25,7 +25,6 @@ import {
     buildTextCompletionContext,
     ContextBuilderParams,
 } from './API/ContextBuilder'
-import { getDataSources } from './DataSources'
 import { Llama, LlamaConfig } from './Local/LlamaLocal'
 import { KV } from './Local/Model'
 
@@ -1315,11 +1314,6 @@ const obtainFields =
                             userCard.name
                         ),
                 },
-
-                // Restore the same DataSource architecture
-                // used by remote/API inference for local models.
-                dataSources:
-                    await getDataSources(),
             }
         } catch (e) {
             Logger.errorToast(
@@ -1329,4 +1323,4 @@ const obtainFields =
                 e
             )
         }
-    }
+}
