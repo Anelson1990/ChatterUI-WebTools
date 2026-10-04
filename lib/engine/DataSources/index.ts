@@ -3,6 +3,7 @@ import { Chats } from '@lib/state/Chat'
 import { replaceMacros } from '@lib/state/Macros'
 
 import createLorebookDataSource from './lorebookSource'
+import createNexusMemoryDataSource from './nexusMemorySource'
 import { DataSource, DataSourceResult } from './types'
 
 export const createExampleDataSource = (): DataSource => ({
@@ -48,17 +49,28 @@ export const createExampleDataSource = (): DataSource => ({
 })
 
 const AUTHOR_NOTE_NAME = 'author_notes'
+
 const createAuthorNotesDataSource = async (): Promise<DataSource | undefined> => {
     const { id: chatId } = Chats.useChatState.getState()
     if (!chatId) return
+
     const chatData = await Chats.db.query.chatShallow(chatId)
     if (!chatData) return
+
     const characterId = chatData.character_id
 
-    const activeNotes = await AuthorNotes.db.query.getActiveNotes(characterId, chatId)
+    const activeNotes = await AuthorNotes.db.query.getActiveNotes(
+        characterId,
+        chatId
+    )
+
     if (!activeNotes || activeNotes.length === 0) return
 
-    const tokenTotal = activeNotes.reduce((a, b) => a + (b.token_length ?? 0), 0)
+    const tokenTotal = activeNotes.reduce(
+        (a, b) => a + (b.token_length ?? 0),
+        0
+    )
+
     const dataSourceResults: DataSourceResult[] = activeNotes.map((item) => ({
         content: replaceMacros(item.content),
         source: AUTHOR_NOTE_NAME,
@@ -73,21 +85,33 @@ const createAuthorNotesDataSource = async (): Promise<DataSource | undefined> =>
         name: AUTHOR_NOTE_NAME,
         priority: 1,
         tokenBudget: tokenTotal,
-        retrieve: async (params) => {
+        retrieve: async () => {
             return dataSourceResults
         },
     }
 }
 
 export const getDataSources = async (): Promise<DataSource[]> => {
-    let dataSources = [createExampleDataSource()]
+    let dataSources: DataSource[] = [
+        createExampleDataSource(),
+    ]
+
     const authorNotesSource = await createAuthorNotesDataSource()
-    if (authorNotesSource) dataSources.push(authorNotesSource)
+
+    if (authorNotesSource) {
+        dataSources.push(authorNotesSource)
+    }
 
     const lorebooks = await createLorebookDataSource()
+
     if (lorebooks) {
         dataSources.push(...lorebooks)
     }
+
+    // NEXUS memory is intentionally added as an independent
+    // DataSource. If memory retrieval fails, the existing
+    // character/lorebook/chat system remains unaffected.
+    dataSources.push(createNexusMemoryDataSource())
 
     return dataSources
 }
