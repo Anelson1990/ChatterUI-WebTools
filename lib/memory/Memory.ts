@@ -29,6 +29,114 @@ export interface MemoryLink {
 
 const now = () => Date.now()
 
+/*
+ * Messages that contain almost no useful semantic information should
+ * never trigger a memory lookup.
+ *
+ * This keeps ordinary conversational turns such as:
+ * "hi"
+ * "hey"
+ * "hello"
+ * "thanks"
+ * from entering the memory retrieval path.
+ */
+const MEMORY_STOP_WORDS = new Set([
+    'a',
+    'an',
+    'and',
+    'are',
+    'as',
+    'at',
+    'be',
+    'but',
+    'by',
+    'can',
+    'do',
+    'for',
+    'from',
+    'get',
+    'go',
+    'has',
+    'have',
+    'he',
+    'hello',
+    'hey',
+    'hi',
+    'i',
+    'if',
+    'in',
+    'is',
+    'it',
+    'just',
+    'me',
+    'my',
+    'no',
+    'of',
+    'on',
+    'or',
+    'please',
+    'she',
+    'so',
+    'that',
+    'the',
+    'thanks',
+    'thank',
+    'this',
+    'to',
+    'we',
+    'what',
+    'when',
+    'where',
+    'who',
+    'why',
+    'with',
+    'yes',
+    'you',
+    'your',
+])
+
+const normalizeSearchTerms = (
+    query: string
+): string[] => {
+    return query
+        .toLowerCase()
+        .replace(
+            /[^\p{L}\p{N}\s'-]/gu,
+            ' '
+        )
+        .split(/\s+/)
+        .map((term) => term.trim())
+        .filter(
+            (term) =>
+                term.length >= 3 &&
+                !MEMORY_STOP_WORDS.has(term)
+        )
+        .filter(
+            (term, index, array) =>
+                array.indexOf(term) === index
+        )
+        .slice(0, 12)
+}
+
+/*
+ * Returns whether a message contains enough meaningful information
+ * to justify a memory lookup.
+ */
+export const shouldSearchMemory = (
+    query: string
+): boolean => {
+    const trimmed = query.trim()
+
+    if (!trimmed) {
+        return false
+    }
+
+    const terms =
+        normalizeSearchTerms(trimmed)
+
+    return terms.length > 0
+}
+
 export const initializeMemory = () => {
     sqliteDB.execSync(`
         CREATE TABLE IF NOT EXISTS nexus_memories (
@@ -69,18 +177,45 @@ export const addMemory = (
 ): number => {
     initializeMemory()
 
+    const cleanedContent =
+        content.trim()
+
+    if (!cleanedContent) {
+        return 0
+    }
+
     const timestamp = now()
 
-    const result = sqliteDB.runSync(
-        `INSERT INTO nexus_memories
-            (content, type, importance, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?)`,
-        content.trim(),
-        type,
-        importance,
-        timestamp,
-        timestamp
-    )
+    const safeImportance =
+        Math.max(
+            0,
+            Math.min(
+                1,
+                Number.isFinite(
+                    importance
+                )
+                    ? importance
+                    : 0.5
+            )
+        )
+
+    const result =
+        sqliteDB.runSync(
+            `INSERT INTO nexus_memories
+                (
+                    content,
+                    type,
+                    importance,
+                    created_at,
+                    updated_at
+                )
+             VALUES (?, ?, ?, ?, ?)`,
+            cleanedContent,
+            type,
+            safeImportance,
+            timestamp,
+            timestamp
+        )
 
     return result.lastInsertRowId
 }
@@ -117,38 +252,56 @@ export const updateMemory = (
 ): boolean => {
     initializeMemory()
 
-    const existing = getMemory(id)
+    const existing =
+        getMemory(id)
 
     if (!existing) {
         return false
     }
 
     const content =
-        updates.content?.trim() ??
-        existing.content
+        updates.content !== undefined
+            ? updates.content.trim()
+            : existing.content
+
+    if (!content) {
+        return false
+    }
 
     const type =
         updates.type ??
         existing.type
 
     const importance =
-        updates.importance ??
-        existing.importance
+        updates.importance !== undefined
+            ? Math.max(
+                  0,
+                  Math.min(
+                      1,
+                      Number.isFinite(
+                          updates.importance
+                      )
+                          ? updates.importance
+                          : existing.importance
+                  )
+              )
+            : existing.importance
 
-    const result = sqliteDB.runSync(
-        `UPDATE nexus_memories
-         SET
-            content = ?,
-            type = ?,
-            importance = ?,
-            updated_at = ?
-         WHERE id = ?`,
-        content,
-        type,
-        importance,
-        now(),
-        id
-    )
+    const result =
+        sqliteDB.runSync(
+            `UPDATE nexus_memories
+             SET
+                content = ?,
+                type = ?,
+                importance = ?,
+                updated_at = ?
+             WHERE id = ?`,
+            content,
+            type,
+            importance,
+            now(),
+            id
+        )
 
     return result.changes > 0
 }
@@ -166,44 +319,60 @@ export const removeMemory = (
         id
     )
 
-    const result = sqliteDB.runSync(
-        `DELETE FROM nexus_memories
-         WHERE id = ?`,
-        id
-    )
+    const result =
+        sqliteDB.runSync(
+            `DELETE FROM nexus_memories
+             WHERE id = ?`,
+            id
+        )
 
     return result.changes > 0
 }
 
+/*
+ * Searches local memory using meaningful words from the user's
+ * current message.
+ *
+ * The query is deliberately conservative:
+ * - generic conversation does not trigger memory retrieval
+ * - only up to 12 meaningful terms are searched
+ * - results are ranked by importance and recency
+ * - SQL errors are allowed to propagate to the DataSource safety
+ *   boundary, where they are converted into "no memory"
+ */
 export const searchMemories = (
     query: string,
     limit = 10
 ): Memory[] => {
     initializeMemory()
 
-    const trimmed =
-        query.trim()
-
-    if (!trimmed) {
+    if (
+        !shouldSearchMemory(query)
+    ) {
         return []
     }
 
     const terms =
-        trimmed
-            .split(/\s+/)
-            .map((term) =>
-                term
-                    .replace(
-                        /[%_]/g,
-                        ''
-                    )
-                    .trim()
-            )
-            .filter(Boolean)
+        normalizeSearchTerms(query)
 
     if (terms.length === 0) {
         return []
     }
+
+    const safeLimit =
+        Math.max(
+            1,
+            Math.min(
+                20,
+                Math.floor(
+                    Number.isFinite(
+                        limit
+                    )
+                        ? limit
+                        : 10
+                )
+            )
+        )
 
     const conditions =
         terms
@@ -240,10 +409,7 @@ export const searchMemories = (
             updated_at DESC
          LIMIT ?`,
         ...params,
-        Math.max(
-            1,
-            Math.floor(limit)
-        )
+        safeLimit
     )
 }
 
@@ -251,6 +417,21 @@ export const getRecentMemories = (
     limit = 10
 ): Memory[] => {
     initializeMemory()
+
+    const safeLimit =
+        Math.max(
+            1,
+            Math.min(
+                20,
+                Math.floor(
+                    Number.isFinite(
+                        limit
+                    )
+                        ? limit
+                        : 10
+                )
+            )
+        )
 
     return sqliteDB.getAllSync<Memory>(
         `SELECT
@@ -263,10 +444,7 @@ export const getRecentMemories = (
          FROM nexus_memories
          ORDER BY updated_at DESC
          LIMIT ?`,
-        Math.max(
-            1,
-            Math.floor(limit)
-        )
+        safeLimit
     )
 }
 
@@ -276,6 +454,18 @@ export const linkMemories = (
     relationship: string
 ): number => {
     initializeMemory()
+
+    const cleanedRelationship =
+        relationship.trim()
+
+    if (
+        !cleanedRelationship ||
+        memoryId <= 0 ||
+        relatedMemoryId <= 0 ||
+        memoryId === relatedMemoryId
+    ) {
+        return 0
+    }
 
     const existing =
         sqliteDB.getFirstSync<{
@@ -289,7 +479,7 @@ export const linkMemories = (
              LIMIT 1`,
             memoryId,
             relatedMemoryId,
-            relationship
+            cleanedRelationship
         )
 
     if (existing) {
@@ -308,7 +498,7 @@ export const linkMemories = (
              VALUES (?, ?, ?, ?)`,
             memoryId,
             relatedMemoryId,
-            relationship,
+            cleanedRelationship,
             now()
         )
 
@@ -325,23 +515,25 @@ export const unlinkMemories = (
     let result
 
     if (relationship) {
-        result = sqliteDB.runSync(
-            `DELETE FROM nexus_memory_links
-             WHERE memory_id = ?
-               AND related_memory_id = ?
-               AND relationship = ?`,
-            memoryId,
-            relatedMemoryId,
-            relationship
-        )
+        result =
+            sqliteDB.runSync(
+                `DELETE FROM nexus_memory_links
+                 WHERE memory_id = ?
+                   AND related_memory_id = ?
+                   AND relationship = ?`,
+                memoryId,
+                relatedMemoryId,
+                relationship
+            )
     } else {
-        result = sqliteDB.runSync(
-            `DELETE FROM nexus_memory_links
-             WHERE memory_id = ?
-               AND related_memory_id = ?`,
-            memoryId,
-            relatedMemoryId
-        )
+        result =
+            sqliteDB.runSync(
+                `DELETE FROM nexus_memory_links
+                 WHERE memory_id = ?
+                   AND related_memory_id = ?`,
+                memoryId,
+                relatedMemoryId
+            )
     }
 
     return result.changes > 0
@@ -368,18 +560,19 @@ export const getMemoryLinks = (
     )
 }
 
-export const getAllMemories = (): Memory[] => {
-    initializeMemory()
+export const getAllMemories =
+    (): Memory[] => {
+        initializeMemory()
 
-    return sqliteDB.getAllSync<Memory>(
-        `SELECT
-            id,
-            content,
-            type,
-            importance,
-            created_at,
-            updated_at
-         FROM nexus_memories
-         ORDER BY updated_at DESC`
-    )
-}
+        return sqliteDB.getAllSync<Memory>(
+            `SELECT
+                id,
+                content,
+                type,
+                importance,
+                created_at,
+                updated_at
+             FROM nexus_memories
+             ORDER BY updated_at DESC`
+        )
+    }
