@@ -638,7 +638,6 @@ const cleanToolControlTokens = (
             /<\|end\|>/gi,
             ''
         )
-        .trim()
 
 const runLocalToolCompletion = async (
     fields: ContextBuilderParams,
@@ -1323,4 +1322,4 @@ const obtainFields =
                 e
             )
         }
-}
+        }
