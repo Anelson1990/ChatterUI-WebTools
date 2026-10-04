@@ -1,7 +1,3 @@
-import { eq } from 'drizzle-orm'
-
-import { sqliteDB } from '@db/db'
-
 export type MemoryType =
     | 'fact'
     | 'person'
@@ -22,10 +18,9 @@ export type MemoryRecord = {
     updatedAt: number
 }
 
-export type MemorySearchResult =
-    MemoryRecord & {
-        score: number
-    }
+export type MemorySearchResult = MemoryRecord & {
+    score: number
+}
 
 export type AddMemoryInput = {
     content: string
@@ -67,7 +62,11 @@ const initialize = async () => {
             related_memory_id INTEGER NOT NULL,
             relationship TEXT NOT NULL,
             created_at INTEGER NOT NULL,
-            PRIMARY KEY (memory_id, related_memory_id, relationship)
+            PRIMARY KEY (
+                memory_id,
+                related_memory_id,
+                relationship
+            )
         );
 
         CREATE INDEX IF NOT EXISTS nexus_memory_links_memory_idx
@@ -80,18 +79,26 @@ const initialize = async () => {
     initialized = true
 }
 
-const rowToMemory = (row: any): MemoryRecord => ({
+const rowToMemory = (
+    row: any
+): MemoryRecord => ({
     id: Number(row.id),
     content: String(row.content ?? ''),
     type: (row.type ?? 'note') as MemoryType,
-    importance: Number(row.importance ?? 50),
+    importance: Number(
+        row.importance ?? 50
+    ),
     chatId:
         row.chat_id === null ||
         row.chat_id === undefined
             ? null
             : Number(row.chat_id),
-    createdAt: Number(row.created_at),
-    updatedAt: Number(row.updated_at),
+    createdAt: Number(
+        row.created_at
+    ),
+    updatedAt: Number(
+        row.updated_at
+    ),
 })
 
 const add = async (
@@ -99,7 +106,8 @@ const add = async (
 ): Promise<MemoryRecord> => {
     await initialize()
 
-    const content = input.content.trim()
+    const content =
+        input.content.trim()
 
     if (!content) {
         throw new Error(
@@ -112,15 +120,16 @@ const add = async (
     const type =
         input.type ?? 'note'
 
-    const importance = Math.max(
-        0,
-        Math.min(
-            100,
-            Math.round(
-                input.importance ?? 50
+    const importance =
+        Math.max(
+            0,
+            Math.min(
+                100,
+                Math.round(
+                    input.importance ?? 50
+                )
             )
         )
-    )
 
     await sqliteDB.runAsync(
         `
@@ -188,10 +197,10 @@ const update = async (
     changes: Partial<
         Pick<
             AddMemoryInput,
-            'content' |
-            'type' |
-            'importance' |
-            'chatId'
+            | 'content'
+            | 'type'
+            | 'importance'
+            | 'chatId'
         >
     >
 ): Promise<MemoryRecord | null> => {
@@ -200,7 +209,9 @@ const update = async (
     const existing =
         await get(id)
 
-    if (!existing) return null
+    if (!existing) {
+        return null
+    }
 
     const content =
         changes.content !== undefined
@@ -294,7 +305,9 @@ const search = async (
     const cleanQuery =
         query.trim()
 
-    if (!cleanQuery) return []
+    if (!cleanQuery) {
+        return []
+    }
 
     const words = cleanQuery
         .split(/\s+/)
@@ -326,45 +339,42 @@ const search = async (
             `
         )
 
-    const results =
-        rows
-            .map(rowToMemory)
-            .map((memory) => {
-                const haystack =
-                    memory.content.toLowerCase()
+    return rows
+        .map(rowToMemory)
+        .map((memory) => {
+            const haystack =
+                memory.content.toLowerCase()
 
-                let matches = 0
+            let matches = 0
 
-                for (const word of words) {
-                    if (
-                        haystack.includes(
-                            word.toLowerCase()
-                        )
-                    ) {
-                        matches++
-                    }
+            for (const word of words) {
+                if (
+                    haystack.includes(
+                        word.toLowerCase()
+                    )
+                ) {
+                    matches++
                 }
+            }
 
-                const score =
-                    matches * 10 +
-                    memory.importance * 0.05
+            const score =
+                matches * 10 +
+                memory.importance * 0.05
 
-                return {
-                    ...memory,
-                    score,
-                }
-            })
-            .filter(
-                (memory) =>
-                    memory.score > 0
-            )
-            .sort(
-                (a, b) =>
-                    b.score - a.score
-            )
-            .slice(0, limit)
-
-    return results
+            return {
+                ...memory,
+                score,
+            }
+        })
+        .filter(
+            (memory) =>
+                memory.score > 0
+        )
+        .sort(
+            (a, b) =>
+                b.score - a.score
+        )
+        .slice(0, limit)
 }
 
 const link = async (
@@ -434,7 +444,9 @@ const getLinks = async (
     return rows.map(
         (row: any) => ({
             memoryId:
-                Number(row.memory_id),
+                Number(
+                    row.memory_id
+                ),
             relatedMemoryId:
                 Number(
                     row.related_memory_id
@@ -457,4 +469,4 @@ export const Memory = {
     search,
     link,
     getLinks,
-          }
+}
