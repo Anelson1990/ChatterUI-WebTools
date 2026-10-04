@@ -757,18 +757,8 @@ const runLocalToolCompletion = async (
             }
         )
 
-    const toolMessages: any[] = [
-        ...messages,
-    ]
-
-    toolMessages.push({
-        role: 'assistant',
-        content: '',
-        tool_calls:
-            normalizedToolCalls,
-    })
-
     let executedTool = false
+    let searchContext = ''
 
     for (const call of normalizedToolCalls) {
         const name =
@@ -803,12 +793,15 @@ const runLocalToolCompletion = async (
                 results
             )
 
-        toolMessages.push({
-            role: 'tool',
-            tool_call_id: call.id,
-            name: 'web_search',
-            content,
-        })
+        if (!content.trim()) {
+            continue
+        }
+
+        searchContext +=
+            `\n\nWEB SEARCH RESULTS FOR: ${query}\n` +
+            `Use these results to answer the user's question. ` +
+            `Do not mention the tool call unless the user asks about it.\n\n` +
+            content
 
         executedTool = true
     }
@@ -817,6 +810,30 @@ const runLocalToolCompletion = async (
         return false
     }
 
+    /*
+     * Important:
+     *
+     * Gemma can emit tool calls using its own textual format, but it
+     * does not reliably consume an OpenAI-style `role: tool` message.
+     *
+     * Instead, give the search results back as explicit user context.
+     * This keeps the second inference pass model-friendly and avoids
+     * exposing tool-control syntax in the final answer.
+     */
+    const finalMessages: any[] = [
+        ...messages,
+        {
+            role: 'user',
+            content:
+                `The following information was retrieved by NEXUS web search.\n` +
+                `Use it as current research context when answering the user's ` +
+                `most recent request.\n` +
+                `If the search results do not contain enough information, say so ` +
+                `rather than inventing facts.\n` +
+                searchContext,
+        },
+    ]
+
     const final =
         await Llama
             .useLlamaModelStore
@@ -824,10 +841,8 @@ const runLocalToolCompletion = async (
             .completionRaw({
                 ...baseParams,
                 messages:
-                    toolMessages,
-                tools: [
-                    WEB_SEARCH_TOOL,
-                ],
+                    finalMessages,
+                tools: [WEB_SEARCH_TOOL],
                 tool_choice: 'none',
             })
 
@@ -1314,4 +1329,4 @@ const obtainFields =
                 e
             )
         }
-        }
+    }
