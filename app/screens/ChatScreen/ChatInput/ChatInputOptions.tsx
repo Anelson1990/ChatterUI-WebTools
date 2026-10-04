@@ -25,6 +25,15 @@ const ChatOptions: React.FC<ChatOptionsProps> = ({ disabled }) => {
         setShow(Drawer.ID.CHATLIST, b)
     }
 
+    const goToCharacterList = (close: () => void) => {
+        close()
+
+        // Always return to the actual Character List route.
+        // router.back() can return to an intermediate route when
+        // the startup routine automatically opens the last chat.
+        router.replace('/')
+    }
+
     return (
         <ContextMenu
             disabled={disabled}
@@ -34,10 +43,7 @@ const ChatOptions: React.FC<ChatOptionsProps> = ({ disabled }) => {
                     border: true,
                 },
                 {
-                    onPress: (close) => {
-                        close()
-                        router.back()
-                    },
+                    onPress: goToCharacterList,
                     label: t('chat.input.actions.mainMenu'),
                     icon: 'backward',
                 },
@@ -69,7 +75,10 @@ const ChatOptions: React.FC<ChatOptionsProps> = ({ disabled }) => {
             placement="top">
             <AntDesign
                 name="caret-up"
-                style={[styles.optionsButton, { opacity: disabled ? 0.5 : 1 }]}
+                style={[
+                    styles.optionsButton,
+                    { opacity: disabled ? 0.5 : 1 },
+                ]}
                 size={24}
             />
         </ContextMenu>
