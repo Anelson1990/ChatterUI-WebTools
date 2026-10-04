@@ -6,7 +6,7 @@ module.exports = {
         name: IS_DEV
             ? 'NEXUS (DEV)'
             : IS_PREVIEW
-                ? 'NEXUS Test'
+                ? 'NEXUS'
                 : 'NEXUS',
 
         newArchEnabled: true,
