@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { useShallow } from 'zustand/react/shallow'
 
+import { IS_ROOM_BUILD } from '@lib/constants/RoomBuild'
 import { Storage } from '@lib/enums/Storage'
 import { CharacterLink } from '@lib/state/CharacterLinks'
 import { Logger } from '@lib/state/Logger'
@@ -45,6 +46,8 @@ export namespace APIManager {
                 updatePreferences: (preferences) =>
                     set({ preferences: { ...get().preferences, ...preferences } }),
                 addValue: (value) => {
+                    // Room builds are local-only: no remote connections can be added.
+                    if (IS_ROOM_BUILD) return
                     const values = [...get().values]
                     values.forEach((item) => (item.active = false))
                     values.push(value)
@@ -54,12 +57,16 @@ export namespace APIManager {
                     })
                 },
                 setActiveIndex: (activeIndex) => {
+                    // Room builds are local-only: no remote connection can be selected.
+                    if (IS_ROOM_BUILD) return
                     const values = get().values.map((item) => ({ ...item, active: false }))
                     if (activeIndex > values.length) return
                     values[activeIndex].active = true
                     set({ activeIndex, values })
                 },
                 addTemplate: (template) => {
+                    // Room builds are local-only: no remote API templates can be added.
+                    if (IS_ROOM_BUILD) return
                     const templates = get().getTemplates()
                     if (templates.some((item) => item.name === template.name)) {
                         const newName = generateUniqueName(
@@ -90,6 +97,8 @@ export namespace APIManager {
                     set((state) => ({ customTemplates: [...templates] }))
                 },
                 editValue: (newValue, index) => {
+                    // Room builds are local-only: remote connections cannot be configured.
+                    if (IS_ROOM_BUILD) return
                     const values = [...get().values]
                     const oldValue = values[index]
                     values[index] = newValue
