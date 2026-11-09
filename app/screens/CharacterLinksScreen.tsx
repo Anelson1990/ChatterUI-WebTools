@@ -8,6 +8,7 @@ import ListSheet from '@components/input/ListSheet'
 import { useBottomSheetRef } from '@components/views/BottomSheet'
 import HeaderTitle from '@components/views/HeaderTitle'
 import { LinkType } from '@db/schema'
+import { IS_ROOM_BUILD } from '@lib/constants/RoomBuild'
 import { APIManager } from '@lib/engine/API/APIManagerState'
 import { useLiveQueryJoined } from '@lib/hooks/LiveQueryJoined'
 import { CharacterLink } from '@lib/state/CharacterLinks'
@@ -155,7 +156,11 @@ const CharacterLinksScreen = () => {
     const { t } = useTranslation()
     const styles = useStyles()
     const charId = Characters.useCharacterStore((state) => state.id)
-    const links = useActiveCharacterLinks(charId ?? -1)
+    const allLinks = useActiveCharacterLinks(charId ?? -1)
+    // Room builds are local-only: a character can never be linked to a remote connection.
+    const links = IS_ROOM_BUILD
+        ? allLinks.filter((link) => link.type !== 'connection_index')
+        : allLinks
 
     return (
         <SafeAreaView
