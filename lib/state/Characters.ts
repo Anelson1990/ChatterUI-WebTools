@@ -31,6 +31,7 @@ import {
 import { replaceMacroBase } from '@lib/utils/Macros'
 
 import { Logger } from './Logger'
+import { IS_ROOM_BUILD } from '../constants/RoomBuild'
 import { createMMKVStorage } from '../storage/MMKV'
 
 export type CharInfo = {
@@ -949,14 +950,18 @@ export namespace Characters {
     }
 
     export const createDefaultCard = async () => {
-        const filename = 'aibot'
+        const filename = IS_ROOM_BUILD ? 'actress' : 'aibot'
         const pngName = filename + '.png'
         const cardDefaultDir = `${Paths.document.uri}appAssets/${pngName}`
 
         try {
             if (!fileExists(cardDefaultDir)) {
                 Logger.info('Importing default card.')
-                const [asset] = await Asset.loadAsync(require('./../../assets/models/aibot.raw'))
+                const [asset] = await Asset.loadAsync(
+                    IS_ROOM_BUILD
+                        ? require('./../../assets/models/actress.raw')
+                        : require('./../../assets/models/aibot.raw')
+                )
                 if (asset.localUri) copyFile({ from: asset.localUri, to: cardDefaultDir })
             }
             await createCharacterFromImage(cardDefaultDir)
