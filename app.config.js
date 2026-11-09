@@ -86,14 +86,23 @@ module.exports = {
                     android: {
                         largeHeap: true,
                         usesCleartextTraffic: true,
-                        enableProguardInReleaseBuilds: true,
-                        enableShrinkResourcesInReleaseBuilds: true,
+                        // Room builds skip ProGuard/R8 and resource
+                        // shrinking: the EAS free-plan 45-minute build
+                        // limit killed two Room builds in/near those
+                        // phases (2026-11-09). Room-only — preview and
+                        // production keep the upstream settings.
+                        enableProguardInReleaseBuilds: !IS_ROOM,
+                        enableShrinkResourcesInReleaseBuilds: !IS_ROOM,
                         useLegacyPackaging: true,
 
                         // Build only ARM64 for the preview APK.
+                        // Room builds too: EAS_BUILD_PROFILE for the
+                        // room profile reports 'preview' as its
+                        // environment, and Expo's logs showed the room
+                        // fingerprint building all four ABIs.
                         buildArchs:
                             process.env.EAS_BUILD_PROFILE ===
-                            'preview'
+                                'preview' || IS_ROOM
                                 ? ['arm64-v8a']
                                 : undefined,
 
