@@ -17,6 +17,7 @@ import { AppDirectory, fileExists, readableFileSize, writeBase64File } from '@li
 import { checkGGMLDeprecated } from './GGML'
 import { KV, Model } from './Model'
 import { AppSettings } from '../../constants/GlobalValues'
+import { IS_ROOM_BUILD } from '../../constants/RoomBuild'
 import { Logger } from '../../state/Logger'
 import { createMMKVStorage, mmkv } from '../../storage/MMKV'
 
@@ -86,8 +87,8 @@ const sessionFile = `${AppDirectory.SessionPath}llama-session.bin`
 
 const defaultConfig = {
     context_length: 4096,
-    threads: 4,
-    gpu_layers: 0,
+    threads: IS_ROOM_BUILD ? 6 : 4,
+    gpu_layers: IS_ROOM_BUILD ? 24 : 0,
     batch: 512,
     ctx_shift: true,
     devices: [],
@@ -211,6 +212,8 @@ export namespace Llama {
             KV.useKVStore.getState().setKvCacheLoaded(false)
         },
         loadMmproj: async (model: ModelDataType) => {
+            // Room builds are text-only: vision projectors never load.
+            if (IS_ROOM_BUILD) return
             const context = get().context
             if (!context) return
 
