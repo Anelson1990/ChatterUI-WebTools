@@ -10,6 +10,7 @@ import { useBottomSheetRef } from '@components/views/BottomSheet'
 import ContextMenu from '@components/views/ContextMenu'
 import InputSheet from '@components/views/InputSheet'
 import { ModelDataType } from '@db/schema'
+import { IS_ROOM_BUILD } from '@lib/constants/RoomBuild'
 import { GGMLNameMap } from '@lib/engine/Local'
 import { Llama } from '@lib/engine/Local/LlamaLocal'
 import { Model, ModelListQueryType } from '@lib/engine/Local/Model'
@@ -210,7 +211,11 @@ const ModelItem: React.FC<ModelItemProps> = ({
                                     iconSize={16}
                                 />
                             ),
-                            disabled: isMMPROJ || !!item.mmprojLink || mmprojList.length === 0,
+                            disabled:
+                                IS_ROOM_BUILD ||
+                                isMMPROJ ||
+                                !!item.mmprojLink ||
+                                mmprojList.length === 0,
                         },
                         {
                             label: t('model.unlinkmmproj'),
@@ -218,7 +223,7 @@ const ModelItem: React.FC<ModelItemProps> = ({
                                 handleUnlinkMMPROJ()
                                 close()
                             },
-                            disabled: isMMPROJ || !item.mmprojLink,
+                            disabled: IS_ROOM_BUILD || isMMPROJ || !item.mmprojLink,
                             icon: 'disconnect',
                         },
                         {
