@@ -24,6 +24,7 @@ import CameraSheet from '@components/views/CameraSheet'
 import ContextMenu from '@components/views/ContextMenu'
 import { XAxisOnlyTransition } from '@lib/animations/transitions'
 import { AppSettings } from '@lib/constants/GlobalValues'
+import { IS_ROOM_BUILD } from '@lib/constants/RoomBuild'
 import { generateResponse } from '@lib/engine/Inference'
 import { useActiveProvider } from '@lib/hooks/ActiveProvider'
 import { useUnfocusTextInput } from '@lib/hooks/UnfocusTextInput'
@@ -87,7 +88,7 @@ const ChatInput = () => {
     const [webSearchEnabled, setWebSearchEnabled] = useState(false)
 
     useEffect(() => {
-        if (!chatId || mode !== 'local') {
+        if (!chatId || mode !== 'local' || IS_ROOM_BUILD) {
             setWebSearchEnabled(false)
             return
         }
@@ -98,6 +99,8 @@ const ChatInput = () => {
     }, [chatId, mode])
 
     const toggleWebSearch = () => {
+        // Room builds have no web tools.
+        if (IS_ROOM_BUILD) return
         if (!chatId || mode !== 'local' || !activeProvider) return
 
         const next = !webSearchEnabled
@@ -164,6 +167,8 @@ const ChatInput = () => {
     }
 
     const handlePickImage = async () => {
+        // Room builds are text-only: no image attachments.
+        if (IS_ROOM_BUILD) return
         const permissionResult =
             await requestMediaLibraryPermissionsAsync()
 
@@ -344,7 +349,7 @@ const ChatInput = () => {
                                 disabled={!activeProvider}
                             />
 
-                            {mode === 'local' && (
+                            {mode === 'local' && !IS_ROOM_BUILD && (
                                 <TouchableOpacity
                                     disabled={!activeProvider}
                                     onPress={toggleWebSearch}
@@ -394,7 +399,8 @@ const ChatInput = () => {
                                 </TouchableOpacity>
                             )}
 
-                            <ContextMenu
+                            {!IS_ROOM_BUILD && (
+                                <ContextMenu
                                 disabled={!activeProvider}
                                 triggerIcon="paper-clip"
                                 triggerIconSize={20}
@@ -431,7 +437,8 @@ const ChatInput = () => {
                                         : 0.5,
                                 }}
                                 placement="top"
-                            />
+                                />
+                            )}
                         </Animated.View>
                     )}
 
