@@ -4,6 +4,7 @@ import { persist } from 'zustand/middleware'
 import { useShallow } from 'zustand/react/shallow'
 
 import Alert from '@components/views/Alert'
+import { IS_ROOM_BUILD } from '@lib/constants/RoomBuild'
 import { Llama } from '@lib/engine/Local/LlamaLocal'
 import { Storage } from '@lib/enums/Storage'
 import { createMMKVStorage } from '@lib/storage/MMKV'
@@ -20,7 +21,8 @@ export const useAppModeStore = create<AppModeStateProps>()(
         (set) => ({
             appMode: 'local',
             setAppMode: (mode) => {
-                set({ appMode: mode })
+                // Room builds are local-only: remote mode can never be selected.
+                set({ appMode: IS_ROOM_BUILD ? 'local' : mode })
             },
         }),
         {
@@ -73,5 +75,6 @@ export const useAppMode = () => {
         [context, setAppModeInternal, unload]
     )
 
-    return { appMode, setAppMode }
+    // Room builds always report local mode, whatever was persisted.
+    return { appMode: IS_ROOM_BUILD ? 'local' : appMode, setAppMode }
 }
