@@ -1,3 +1,5 @@
+import { IS_ROOM_BUILD } from './RoomBuild'
+
 export const enum Global {
     // Removed - These values are archived incase future issues arise due to unhandled cases
 
@@ -150,14 +152,14 @@ export enum AppSettings {
  */
 export const AppSettingsDefault: Record<AppSettings, boolean> = {
     [AppSettings.AnimateEditor]: true,
-    [AppSettings.AutoLoadLocal]: false,
+    [AppSettings.AutoLoadLocal]: IS_ROOM_BUILD,
     [AppSettings.AutoScroll]: true,
     [AppSettings.ChatOnStartup]: false,
     [AppSettings.CreateFirstMes]: true,
     [AppSettings.DarkMode]: true,
     [AppSettings.DevMode]: false,
     [AppSettings.SendOnEnter]: false,
-    [AppSettings.SaveLocalKV]: false,
+    [AppSettings.SaveLocalKV]: IS_ROOM_BUILD,
     [AppSettings.PrintContext]: false,
     [AppSettings.CreateDefaultCard]: true,
     [AppSettings.BypassContextLength]: false,
