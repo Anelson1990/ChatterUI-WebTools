@@ -9,6 +9,7 @@ import { persist } from 'zustand/middleware'
 
 import { db } from '@db/db'
 import { model_data, model_mmproj_links, ModelDataType } from '@db/schema'
+import { IS_ROOM_BUILD } from '@lib/constants/RoomBuild'
 import { Storage } from '@lib/enums/Storage'
 import { CharacterLink } from '@lib/state/CharacterLinks'
 import { Logger } from '@lib/state/Logger'
@@ -191,6 +192,8 @@ export namespace Model {
         model: ModelListQueryType,
         mmproj: ModelListQueryType
     ) => {
+        // Room builds are text-only: vision projectors cannot be linked.
+        if (IS_ROOM_BUILD) return
         await db.insert(model_mmproj_links).values({ model_id: model.id, mmproj_id: mmproj.id })
     }
 
