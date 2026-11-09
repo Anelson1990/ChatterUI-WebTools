@@ -1,12 +1,13 @@
 const IS_DEV = process.env.APP_VARIANT === 'development'
 const IS_PREVIEW = process.env.EAS_BUILD_PROFILE === 'preview'
+const IS_ROOM = process.env.EXPO_PUBLIC_ROOM_BUILD === '1'
 
 module.exports = {
     expo: {
-        name: IS_DEV
-            ? 'NEXUS (DEV)'
-            : IS_PREVIEW
-                ? 'NEXUS'
+        name: IS_ROOM
+            ? 'Nexus — The Room'
+            : IS_DEV
+                ? 'NEXUS (DEV)'
                 : 'NEXUS',
 
         newArchEnabled: true,
@@ -44,11 +45,13 @@ module.exports = {
                 backgroundColor: '#000',
             },
 
-            package: IS_DEV
-                ? 'com.Vali98.ChatterUIDev'
-                : IS_PREVIEW
-                    ? 'com.Vali98.ChatterUITest'
-                    : 'com.Vali98.ChatterUI',
+            package: IS_ROOM
+                ? 'com.nelco.nexusroom'
+                : IS_DEV
+                    ? 'com.Vali98.ChatterUIDev'
+                    : IS_PREVIEW
+                        ? 'com.Vali98.ChatterUITest'
+                        : 'com.Vali98.ChatterUI',
 
             userInterfaceStyle: 'dark',
 
@@ -71,6 +74,7 @@ module.exports = {
                 {
                     assets: [
                         './assets/models/aibot.raw',
+                        './assets/models/actress.raw',
                         './assets/models/llama3tokenizer.gguf',
                     ],
                 },
@@ -176,6 +180,8 @@ module.exports = {
         },
 
         extra: {
+            roomBuild: IS_ROOM,
+
             router: {
                 origin: false,
             },
