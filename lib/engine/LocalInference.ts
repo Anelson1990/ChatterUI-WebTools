@@ -4,6 +4,7 @@ import { t } from 'i18next'
 import Alert from '@components/views/Alert'
 import { CompletionTimings } from '@db/schema'
 import { AppSettings } from '@lib/constants/GlobalValues'
+import { IS_ROOM_BUILD } from '@lib/constants/RoomBuild'
 import { SamplerConfigData, SamplerID, Samplers } from '@lib/constants/SamplerData'
 import { isCloseThinkTag, isOpenThinkTag } from '@lib/markdown/ThinkTags'
 import { Characters } from '@lib/state/Characters'
@@ -440,11 +441,11 @@ export const localInference = async () => {
         const chatId =
             Chats.useChatState.getState().id
 
-        const webSearchEnabled = chatId
-            ? mmkv.getBoolean(
-                  `nexus.webSearch.${chatId}`
-              ) ?? false
-            : false
+        // Room builds never offer web tools, whatever the persisted toggle says.
+        const webSearchEnabled =
+            !IS_ROOM_BUILD && chatId
+                ? (mmkv.getBoolean(`nexus.webSearch.${chatId}`) ?? false)
+                : false
 
         if (webSearchEnabled) {
             const usedTool =
@@ -649,6 +650,9 @@ const runLocalToolCompletion = async (
         >
     >
 ) => {
+    // Room builds never register or run the web_search tool.
+    if (IS_ROOM_BUILD) return false
+
     const context =
         Llama.useLlamaModelStore
             .getState()
