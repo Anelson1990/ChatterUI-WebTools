@@ -5,6 +5,15 @@
       "android": {
         "buildType": "apk"
       }
+    },
+    "room": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_ROOM_BUILD": "1"
+      }
     }
   }
 }
