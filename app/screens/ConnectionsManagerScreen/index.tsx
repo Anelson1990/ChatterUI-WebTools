@@ -11,6 +11,7 @@ import { useBottomSheetRef } from '@components/views/BottomSheet'
 import ContextMenu from '@components/views/ContextMenu'
 import HeaderButton from '@components/views/HeaderButton'
 import HeaderTitle from '@components/views/HeaderTitle'
+import { IS_ROOM_BUILD } from '@lib/constants/RoomBuild'
 import { APIManager } from '@lib/engine/API/APIManagerState'
 import { Theme } from '@lib/theme/ThemeManager'
 
@@ -99,15 +100,17 @@ const ConnectionsManagerScreen = () => {
                 </View>
             )}
 
-            <ThemedButton
-                buttonStyle={{
-                    marginHorizontal: spacing.xl,
-                }}
-                onPress={() => {
-                    templatePickerRef.current?.open()
-                }}
-                label={t('connections.manager.add')}
-            />
+            {!IS_ROOM_BUILD && (
+                <ThemedButton
+                    buttonStyle={{
+                        marginHorizontal: spacing.xl,
+                    }}
+                    onPress={() => {
+                        templatePickerRef.current?.open()
+                    }}
+                    label={t('connections.manager.add')}
+                />
+            )}
             <TemplatePicker ref={templatePickerRef} setPending={setPendingOpen} />
         </SafeAreaView>
     )
