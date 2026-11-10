@@ -65,9 +65,18 @@ const setAppDefaultSettings = () => {
 
 const createDefaultCard = async () => {
     if (!mmkv.getBoolean(AppSettings.CreateDefaultCard)) return
-    const result = await Characters.db.query.cardList('character')
-    if (result.length === 0) await Characters.createDefaultCard()
-    mmkv.set(AppSettings.CreateDefaultCard, false)
+    try {
+        const result = await Characters.db.query.cardList('character')
+        if (result.length === 0) await Characters.createDefaultCard()
+        // Only burn the one-shot flag once the roster is verified non-empty.
+        // The fire-and-forget call in startupApp raced DB init on first
+        // launch (2026-11-09) and the old code cleared the flag regardless
+        // of outcome, so the actress never seeded and could never retry.
+        const verify = await Characters.db.query.cardList('character')
+        if (verify.length > 0) mmkv.set(AppSettings.CreateDefaultCard, false)
+    } catch {
+        // Leave the flag set so the next launch retries the seed.
+    }
 }
 
 const setCPUFeatures = async () => {
