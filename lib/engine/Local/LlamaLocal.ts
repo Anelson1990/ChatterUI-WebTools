@@ -88,7 +88,12 @@ const sessionFile = `${AppDirectory.SessionPath}llama-session.bin`
 const defaultConfig = {
     context_length: 4096,
     threads: IS_ROOM_BUILD ? 6 : 4,
-    gpu_layers: IS_ROOM_BUILD ? 24 : 0,
+    // Room builds: 0, honestly. cui-llama.rn ships no working GPU offload
+    // on Android (upstream's own note in ModelSettings.tsx: "llama.rn
+    // does not have any Android gpu acceleration"), so the old 24 was a
+    // no-op that read like a promise. If a future engine build enumerates
+    // a real OpenCL device, raise this together with `devices`.
+    gpu_layers: 0,
     batch: 512,
     ctx_shift: true,
     devices: [],
@@ -299,7 +304,10 @@ export namespace Llama {
                         `\n---- Start Chat ${get().chatCount} ----\n${textTimings(timings)}\n---- End Chat ${get().chatCount} ----\n`
                     )
                     set({ chatCount: get().chatCount + 1 })
-                    if (mmkv.getBoolean(AppSettings.SaveLocalKV)) {
+                    // Room builds never write the KV session: nothing in a
+                    // room build restores it (see localInference), and the
+                    // save costs time after every reply.
+                    if (!IS_ROOM_BUILD && mmkv.getBoolean(AppSettings.SaveLocalKV)) {
                         await get().saveKV(params.prompt, params.media_paths ?? [])
                     }
                 })
