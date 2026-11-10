@@ -12,6 +12,8 @@ import Drawer from '@components/views/Drawer'
 import HeaderButton from '@components/views/HeaderButton'
 import HeaderTitle from '@components/views/HeaderTitle'
 import SettingsDrawer from '@components/views/SettingsDrawer'
+import { IS_ROOM_BUILD } from '@lib/constants/RoomBuild'
+import { preloadLocalModel } from '@lib/engine/LocalInference'
 import { Characters } from '@lib/state/Characters'
 import { Chats } from '@lib/state/Chat'
 import { Logger } from '@lib/state/Logger'
@@ -54,6 +56,11 @@ const ChatScreen = () => {
     )
 
     useEffect(() => {
+        // Room builds: warm the local model as soon as the chat screen
+        // opens, so she is loaded before the first message is sent
+        // instead of loading on send. Fire-and-forget; errors surface
+        // through the normal inference path on send.
+        if (IS_ROOM_BUILD) preloadLocalModel().catch(() => {})
         return () => {
             unloadCharacter()
             resetId()
