@@ -263,6 +263,21 @@ const constructReplaceStrings = (): string[] => {
     return stops
 }
 
+/**
+ * Room builds: warm the last-used local model ahead of the first send.
+ * verifyModelLoaded() only runs inside localInference() (on send), so
+ * without this the model load wait lands on the first message every
+ * session. Safe to call repeatedly: it no-ops when a model is loaded,
+ * when AutoLoad is off, or when no last model is recorded.
+ */
+export const preloadLocalModel = async (): Promise<void> => {
+    try {
+        await verifyModelLoaded()
+    } catch {
+        // Preload is best-effort; the send path reports real failures.
+    }
+}
+
 const verifyModelLoaded = async (): Promise<boolean> => {
     const model = Llama.useLlamaModelStore.getState().model
 
@@ -358,7 +373,16 @@ export const localInference = async () => {
             return
         }
 
+        // Room builds skip the saved-KV restore entirely: the persisted
+        // token list and the session file are written by different paths
+        // (completion() saves post-generation state while setKvCacheTokens
+        // records the pre-generation prompt), so the token comparison
+        // below can never match after a reload. The result was a
+        // "Cache Mismatch" alert — or a silent stall — on effectively
+        // every message. Room chats reprocess the prompt instead; the
+        // card is small and the chat is short.
         if (
+            !IS_ROOM_BUILD &&
             mmkv.getBoolean(AppSettings.SaveLocalKV) &&
             !KV.useKVStore.getState().kvCacheLoaded
         ) {
